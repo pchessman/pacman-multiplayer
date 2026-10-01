@@ -5,6 +5,7 @@
 }
 
 :root {
+  color-scheme: dark;
   --bulb: #ffd23f;
   --bulb-off: #241e0a;
   --frame: #2121de;
@@ -22,6 +23,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding-inline: 16px;
   font-family: "Press Start 2P", monospace;
   color: #dedede;
   background: radial-gradient(ellipse at center, #0c0c30 0%, #000 70%);

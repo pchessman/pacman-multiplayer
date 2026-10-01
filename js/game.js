@@ -1051,7 +1051,7 @@ class Game {
 
   function fit() {
     const help = document.getElementById('help');
-    const availW = window.innerWidth - 60;
+    const availW = window.innerWidth - 32 - 50; // body gutters + bezel
     const availH = window.innerHeight - help.offsetHeight - 80;
     let s = Math.min(availW / WIDTH, availH / HEIGHT);
     if (s >= 1) s = Math.floor(s * 2) / 2; // keep native pixels whole
