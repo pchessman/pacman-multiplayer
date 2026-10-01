@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pac-Man Versus</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-lights="idle">
+  <main id="cabinet">
+    <div id="bezel">
+      <div id="lights" aria-hidden="true"></div>
+      <div id="screen">
+        <canvas id="game" width="448" height="576" aria-label="Pac-Man Versus game screen"></canvas>
+        <div id="crt" aria-hidden="true"></div>
+      </div>
+    </div>
+    <p id="help">
+      <span class="pac">PAC-MAN: W A S D</span>
+      <span class="ghost">GHOST: ARROWS</span>
+      <span>P: PAUSE</span>
+      <span>M: MUTE</span>
+    </p>
+  </main>
+  <script src="js/audio.js"></script>
+  <script src="js/sprites.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
