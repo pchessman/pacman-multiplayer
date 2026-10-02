@@ -64,8 +64,17 @@ const GHOSTS = {
   pinky:  { color: '#FFB8FF', nick: 'SPEEDY',  start: { x: 14, y: 14.5 }, dir: DOWN, corner: { x: 2, y: -4 } },
   inky:   { color: '#00FFFF', nick: 'BASHFUL', start: { x: 12, y: 14.5 }, dir: UP,   corner: { x: 27, y: 31 } },
   clyde:  { color: '#FFB852', nick: 'POKEY',   start: { x: 16, y: 14.5 }, dir: UP,   corner: { x: 0, y: 31 } },
+  // Optional 5th ghost (not in the arcade): slips in through a side tunnel a few
+  // seconds into each round and tries to cut Pac-Man off from behind.
+  funky:  { color: '#3CFF6E', nick: 'SNEAKY',  start: { x: 0.5, y: 14.5 }, dir: RIGHT, corner: { x: 14, y: 34 }, spawnDelay: 8 },
 };
 const GHOST_ORDER = ['blinky', 'pinky', 'inky', 'clyde'];
+
+// Pac-Man's arcade start, and the two co-op spots either side of it.
+const PAC_STARTS = {
+  versus: [{ who: 'pac', x: 14, y: 23.5, dir: LEFT }],
+  coop: [{ who: 'pac', x: 13, y: 23.5, dir: LEFT }, { who: 'ms', x: 15, y: 23.5, dir: RIGHT }],
+};
 
 /* ---------- arcade level tables (index = level - 1, last entry repeats) ---------- */
 
@@ -110,7 +119,8 @@ const fruitUnlockLevel = kind => FRUIT_BY_LEVEL.indexOf(kind) + 1;
 const modeTimesFor = level => MODE_TIMES[level === 1 ? 0 : level < 5 ? 1 : 2];
 const houseLimitsFor = level => HOUSE_DOT_LIMITS[Math.min(level, 3) - 1];
 
-function computeSpeeds(level, boost) {
+// boost: player ghost vs Pac-Man (versus). aiSpeed: AI ghosts vs arcade speed.
+function computeSpeeds(level, boost, aiSpeed = 0) {
   const tier = (a, b, c, d = c) => (level === 1 ? a : level < 5 ? b : level < 21 ? c : d) * BASE_SPEED;
   const pac = tier(0.80, 0.90, 1.00, 0.90);
   const ghost = tier(0.75, 0.85, 0.95);
@@ -122,6 +132,7 @@ function computeSpeeds(level, boost) {
     fright: tier(0.50, 0.55, 0.60),
     tunnel: tier(0.40, 0.45, 0.50),
     player,
+    aiMult: 1 + aiSpeed,
     // Cruise Elroy multipliers relative to normal ghost speed (arcade: +5% / +10% of full speed)
     elroy1: (ghost + 0.05 * BASE_SPEED) / ghost,
     elroy2: (ghost + 0.10 * BASE_SPEED) / ghost,
@@ -146,15 +157,47 @@ const SUGAR_RUSH = { time: 4, mult: 1.25 };
 
 /* ---------- options ---------- */
 
+const speedFmt = v => (v === 0 ? 'NORMAL' : (v > 0 ? '+' : '-') + Math.round(Math.abs(v) * 100) + '%');
+const onOff = v => (v ? 'ON' : 'OFF');
+const versus = s => s.mode === 'versus';
+const coop = s => s.mode === 'coop';
+const always = () => true;
+
+// Title-screen options. `show` hides the ones that don't apply to the chosen mode.
 const OPTIONS = [
-  { key: 'ai',     label: 'AI GHOSTS',     values: [0, 1, 2, 3],                      fmt: v => String(v) },
-  { key: 'boost',  label: 'GHOST SPEED',   values: [0.05, 0.1, 0.15, 0.2, 0.25, 0.3], fmt: v => '+' + Math.round(v * 100) + '%' },
-  { key: 'lives',  label: 'LIVES',         values: [1, 2, 3, 4, 5],                   fmt: v => String(v) },
-  { key: 'goal',   label: 'LEVEL GOAL',    values: [0, 1, 2, 3, 5, 10],               fmt: v => (v ? String(v) : 'ENDLESS') },
-  { key: 'treats', label: 'BONUS TREATS',  values: [true, false],                     fmt: v => (v ? 'ON' : 'OFF') },
+  { key: 'mode',       label: 'MODE',         values: ['versus', 'coop'],           fmt: v => (v === 'coop' ? 'CO-OP' : 'VS GHOST'), show: always },
+  { key: 'boost',      label: 'GHOST SPEED',  values: [-0.3, -0.2, -0.1, 0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5], fmt: speedFmt, show: versus },
+  { key: 'aiSpeed',    label: 'GHOST SPEED',  values: [-0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4, 0.5], fmt: speedFmt, show: coop },
+  { key: 'ai',         label: 'AI GHOSTS',    values: [0, 1, 2, 3],                 fmt: String, show: versus },
+  { key: 'coopGhosts', label: 'GHOSTS',       values: [1, 2, 3, 4],                 fmt: String, show: coop },
+  { key: 'extra',      label: 'EXTRA GHOST',  values: [false, true],                fmt: onOff, show: always },
+  { key: 'lives',      label: 'LIVES',        values: [1, 2, 3, 4, 5],              fmt: String, show: always },
+  { key: 'livesMode',  label: 'LIVES POOL',   values: ['separate', 'shared'],       fmt: v => v.toUpperCase(), show: coop },
+  { key: 'scoreMode',  label: 'POINTS',       values: ['separate', 'shared'],       fmt: v => v.toUpperCase(), show: coop },
+  { key: 'goal',       label: 'LEVEL GOAL',   values: [0, 1, 2, 3, 5, 10],          fmt: v => (v ? String(v) : 'ENDLESS'), show: always },
+  { key: 'treats',     label: 'BONUS TREATS', values: [true, false],                fmt: onOff, show: always },
 ];
-const DEFAULT_SETTINGS = { ai: 0, boost: 0.15, lives: 3, goal: 0, treats: true };
-const SETTINGS_KEY = 'pacvs-settings-v2';
+const DEFAULT_SETTINGS = {
+  mode: 'versus', boost: 0.15, aiSpeed: 0, ai: 0, coopGhosts: 4, extra: false,
+  lives: 3, livesMode: 'separate', scoreMode: 'separate', goal: 0, treats: true,
+};
+const SETTINGS_KEY = 'pacvs-settings-v3';
+const LEGACY_SETTINGS_KEY = 'pacvs-settings-v2';
+
+// Saved data is untrusted: keep only values the game actually offers.
+function sanitizeSettings(raw) {
+  const out = { ...DEFAULT_SETTINGS };
+  if (raw && typeof raw === 'object') {
+    for (const o of OPTIONS) {
+      if (Object.prototype.hasOwnProperty.call(raw, o.key) && o.values.includes(raw[o.key])) out[o.key] = raw[o.key];
+    }
+  }
+  return out;
+}
+
+function safeInt(v, min, max, fallback) {
+  return Number.isSafeInteger(v) && v >= min && v <= max ? v : fallback;
+}
 
 const MOUTHS = [0, 0.16, 0.3, 0.16].map(m => m * Math.PI);
 
@@ -167,3 +210,15 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
 };
+
+// Lock the shared tables so nothing can rewrite the rules at runtime.
+function deepFreeze(o) {
+  if (o && typeof o === 'object' && !Object.isFrozen(o)) {
+    Object.freeze(o);
+    for (const v of Object.values(o)) deepFreeze(v);
+  }
+  return o;
+}
+[LAYOUT, GHOSTS, GHOST_ORDER, PAC_STARTS, FRUITS, FRUIT_ORDER, FRUIT_BY_LEVEL, FRIGHT_TIME, FRIGHT_FLASHES, ELROY_DOTS,
+  MODE_TIMES, HOUSE_DOT_LIMITS, HOUSE_GLOBAL_LIMITS, INTERMISSIONS, TREATS, TREAT_ORDER, TREAT_DOTS, SUGAR_RUSH,
+  OPTIONS, DEFAULT_SETTINGS, MOUTHS, COLOR, PAC_KEYS, GHOST_KEYS, DOOR, FRUIT_SPOT, DIR_ORDER].forEach(deepFreeze);

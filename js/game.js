@@ -1,5 +1,7 @@
 /* Pac-Man Versus — game flow, rules, rendering and input.
-   Player 1 is Pac-Man (WASD), player 2 is Blinky the ghost (arrow keys). */
+   VS GHOST: player 1 is Pac-Man (WASD), player 2 is Blinky the ghost (arrows).
+   CO-OP:    player 1 is Pac-Man (WASD), player 2 is Ms. Pac-Man (arrows),
+             together against the AI ghosts. */
 'use strict';
 
 class Game {
@@ -7,28 +9,39 @@ class Game {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false });
     this.k = 0;
+    this.font = '';
     this.maze = new Maze();
     this.eyesMap = distanceMap(this.maze, [[13, 11]]);
     this.exitMap = distanceMap(this.maze, [[0, 14], [COLS - 1, 14]]);
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, store.get(SETTINGS_KEY, {}));
-    this.hiscore = store.get('pacvs-hiscore', 0);
-    this.bestLevel = store.get('pacvs-best-level', 1); // furthest level ever reached; unlocks fruit on the title page
+
+    // Everything read back from storage is validated before use.
+    this.settings = sanitizeSettings(store.get(SETTINGS_KEY, null) || store.get(LEGACY_SETTINGS_KEY, null));
+    this.hiscore = safeInt(store.get('pacvs-hiscore', 0), 0, 999999990, 0);
+    this.bestLevel = safeInt(store.get('pacvs-best-level', 1), 1, 1000000, 1); // unlocks fruit on the title page
+    this.rules = Object.freeze({ ...this.settings }); // the settings a match was started with
+
     this.fruitNews = null;
     this.series = { pac: 0, ghost: 0 };
     this.menuIndex = 0;
     this.time = 0;
     this.paused = false;
     this.lights = '';
-    this.pac = new Pacman(this);
+    this.toastText = '';
+    this.toastLife = 0;
+    this.onModeChange = () => {};
+    this.pacs = [new Pacman(this)];
     this.ghosts = [];
+    this.playerGhost = null;
+    this.blinky = null;
     this.popups = [];
     this.score = 0;
     this.catches = 0;
     this.level = 1;
     this.lives = 0;
+    this.stats = { ghosts: 0, fruit: 0, treats: 0, rushes: 0 };
     this.speeds = computeSpeeds(1, this.settings.boost);
 
-    // Pac-Man's turn logic (the player ghost has its own, with the no-up rule).
+    // Turn logic for the human-driven Pac-Men (the player ghost has its own, with the no-up rule).
     this.playerCenter = a => {
       const c = Math.floor(a.x), r = Math.floor(a.y);
       if (a.want && this.maze.walkable(c + a.want.x, r + a.want.y)) {
@@ -51,8 +64,7 @@ class Game {
     LAYOUT.forEach((row, r) => [...row].forEach((ch, c) => { if (ch === 'o') this.pellets.push([c, r]); }));
     this.maze.onTake = (c, r, ch) => {
       if (ch !== '.') return;
-      const k = this.k;
-      const g = this.boardLayer.getContext('2d');
+      const k = this.k, g = this.boardLayer.getContext('2d');
       g.fillStyle = '#000';
       g.fillRect((c * T + T / 2 - 2) * k, (r * T + T / 2 - 2) * k, 4 * k, 4 * k);
     };
@@ -61,10 +73,16 @@ class Game {
     this.state = 'title';
   }
 
+  get pac() { return this.pacs[0]; }
+  get coop() { return this.rules.mode === 'coop'; }
+  get sharedScore() { return !this.coop || this.rules.scoreMode === 'shared'; }
+  get sharedLives() { return !this.coop || this.rules.livesMode === 'shared'; }
+
   // Render at `k` device pixels per canvas unit so the board stays sharp at any size.
   setScale(k) {
     if (k === this.k) return;
     this.k = k;
+    this.font = '';
     this.canvas.width = WIDTH * k;
     this.canvas.height = HEIGHT * k;
     for (const layer of [this.boardLayer, this.flashLayer]) {
@@ -96,10 +114,14 @@ class Game {
   /* ---------- flow ---------- */
 
   newMatch() {
+    this.rules = Object.freeze({ ...this.settings });
+    this.pacs = PAC_STARTS[this.rules.mode].map(start => new Pacman(this, start));
+    for (const p of this.pacs) p.lives = this.rules.lives;
+    // a shared pool holds both players' lives
+    this.lives = this.coop && this.sharedLives ? this.rules.lives * 2 : this.rules.lives;
     this.level = 1;
     this.score = 0;
     this.catches = 0;
-    this.lives = this.settings.lives;
     this.extraGiven = false;
     this.levelsCleared = 0;
     this.winner = null;
@@ -120,7 +142,7 @@ class Game {
     this.maze.reset();
     this.drawBoardLayer();
     this.dotsEaten = 0;
-    this.speeds = computeSpeeds(this.level, this.settings.boost);
+    this.speeds = computeSpeeds(this.level, this.rules.boost, this.coop ? this.rules.aiSpeed : 0);
     this.houseDots = { pinky: 0, inky: 0, clyde: 0 };
     this.globalCounter = null;
     this.elroySuspended = false;
@@ -128,12 +150,15 @@ class Game {
     this.resetActors();
     this.state = 'ready';
     this.readyTimer = first ? 4.3 : 3;
-    if (first) Sound.intro();
+    if (first) {
+      if (Sound.hasTheme()) { if (!Sound.themePlaying()) Sound.playTheme(false); }
+      else Sound.intro();
+    }
   }
 
   resetActors() {
-    this.pac.reset();
-    this.ghosts = GHOST_ORDER.slice(0, 1 + this.settings.ai).map((k, i) => new Ghost(this, k, i === 0));
+    for (const p of this.pacs) if (!p.out) p.reset();
+    this.buildGhosts();
     this.powerTime = 0;
     this.flashes = 0;
     this.chain = 0;
@@ -145,32 +170,62 @@ class Game {
     this.treat = null;
   }
 
+  buildGhosts() {
+    const r = this.rules, list = [];
+    if (this.coop) {
+      for (const k of GHOST_ORDER.slice(0, r.coopGhosts)) list.push(new Ghost(this, k, false));
+    } else {
+      list.push(new Ghost(this, 'blinky', true));
+      for (const k of GHOST_ORDER.slice(1, 1 + r.ai)) list.push(new Ghost(this, k, false));
+    }
+    if (r.extra) list.push(new Ghost(this, 'funky', false));
+    this.ghosts = list;
+    this.playerGhost = this.coop ? null : list[0];
+    this.blinky = list.find(g => g.kind === 'blinky') || null;
+  }
+
   gameOver(winner) {
     this.state = 'over';
     this.winner = winner;
     this.overTimer = 0;
-    if (this.settings.goal) this.series[winner]++;
-    store.set('pacvs-hiscore', this.hiscore);
-    if (winner === 'pac') Sound.win(); else Sound.lose();
+    if (!this.coop && this.rules.goal) this.series[winner]++;
+    this.save();
+    if (winner === 'pac' || winner === 'team') Sound.win(); else Sound.lose();
   }
 
-  addScore(n) {
-    this.score += n;
-    if (!this.extraGiven && this.score >= 10000) {
-      this.extraGiven = true;
-      this.lives++;
-      Sound.extraLife();
+  // Points go to the team (shared) or to the Pac-Man who earned them.
+  addScore(n, pac) {
+    if (this.sharedScore) {
+      this.score += n;
+      if (!this.extraGiven && this.score >= 10000) { this.extraGiven = true; this.grantLife(null); }
+      if (this.score > this.hiscore) this.hiscore = this.score;
+    } else {
+      pac.score += n;
+      if (!pac.extraGiven && pac.score >= 10000) { pac.extraGiven = true; this.grantLife(pac); }
+      if (pac.score > this.hiscore) this.hiscore = pac.score;
     }
-    if (this.score > this.hiscore) this.hiscore = this.score;
+  }
+
+  grantLife(pac) {
+    if (this.sharedLives) this.lives++;
+    else if (pac) pac.lives++;
+    else for (const p of this.pacs) if (!p.out) p.lives++;
+    Sound.extraLife();
   }
 
   popup(x, y, text, color, life) {
     this.popups.push({ x, y, text, color, life });
   }
 
+  toast(text) {
+    this.toastText = String(text).slice(0, 40);
+    this.toastLife = 3;
+  }
+
   /* ---------- update ---------- */
 
   update(dt) {
+    if (this.toastLife > 0) this.toastLife -= dt;
     if (this.paused) { this.setLights('pause'); return; }
     this.time += dt;
     if (this.fruitNews && (this.state === 'ready' || this.state === 'play')) {
@@ -180,7 +235,10 @@ class Game {
     switch (this.state) {
       case 'ready':
         this.readyTimer -= dt;
-        if (this.readyTimer <= 0) this.state = 'play';
+        if (this.readyTimer <= 0) {
+          this.state = 'play';
+          if (Sound.themePlaying()) Sound.fadeTheme();
+        }
         break;
       case 'play':
         this.updatePlay(dt);
@@ -193,24 +251,13 @@ class Game {
       case 'dying':
         this.dieTimer += dt;
         if (this.dieTimer >= 1 && !this.deathSfx) { this.deathSfx = true; Sound.death(); }
-        if (this.dieTimer >= 3) {
-          this.lives--;
-          if (this.lives > 0) {
-            this.resetActors();
-            this.globalCounter = 0; // arcade: after a death the house uses one shared dot counter
-            this.elroySuspended = this.ghosts.some(g => g.kind === 'clyde');
-            this.state = 'ready';
-            this.readyTimer = 2;
-          } else {
-            this.gameOver('ghost');
-          }
-        }
+        if (this.dieTimer >= 3) this.afterDeath();
         break;
       case 'clear':
         this.clearTimer += dt;
         if (this.clearTimer >= 3) {
           const act = INTERMISSIONS[this.level];
-          if (this.settings.goal && this.levelsCleared >= this.settings.goal) this.gameOver('pac');
+          if (this.rules.goal && this.levelsCleared >= this.rules.goal) this.gameOver(this.coop ? 'team' : 'pac');
           else if (act) { this.state = 'cutscene'; this.cutscene = new Intermission(this, act); }
           else this.nextLevel();
         }
@@ -225,6 +272,25 @@ class Game {
     }
     this.updateSiren();
     this.setLights(this.lightMode());
+  }
+
+  afterDeath() {
+    let over;
+    if (this.sharedLives) {
+      this.lives--;
+      over = this.lives <= 0;
+    } else {
+      const p = this.dyingPac;
+      p.lives--;
+      if (p.lives <= 0) p.out = true;
+      over = this.pacs.every(q => q.out);
+    }
+    if (over) { this.gameOver(this.coop ? 'ghosts' : 'ghost'); return; }
+    this.resetActors();
+    this.globalCounter = 0; // arcade: after a death the house uses one shared dot counter
+    this.elroySuspended = this.ghosts.some(g => g.kind === 'clyde');
+    this.state = 'ready';
+    this.readyTimer = 2;
   }
 
   nextLevel() {
@@ -254,28 +320,34 @@ class Game {
       this.fruit.life -= dt;
       if (this.fruit.life <= 0) this.fruit = null;
     }
-    this.updatePopups(dt);
+    if (this.popups.length) this.updatePopups(dt);
     this.updateHouse(dt);
     this.updateElroy();
 
     const steps = Math.max(1, Math.ceil(dt / SUBSTEP));
     const h = dt / steps;
-    for (let i = 0; i < steps && this.state === 'play'; i++) {
-      this.pac.update(h, this.powerTime > 0 ? this.speeds.pacFright : this.speeds.pac);
-      this.eat();
-      if (this.state !== 'play') break;
+    const pacSpeed = this.powerTime > 0 ? this.speeds.pacFright : this.speeds.pac;
+    step: for (let i = 0; i < steps && this.state === 'play'; i++) {
+      for (const p of this.pacs) {
+        if (p.out) continue;
+        p.update(h, pacSpeed);
+        this.eat(p);
+        if (this.state !== 'play') break step;
+      }
       for (const g of this.ghosts) g.update(h);
       if (this.treat) this.treat.update(h);
       this.checkTreat();
       this.checkCollisions();
     }
 
-    const pg = this.ghosts[0];
-    if (pg.rush > 0 && pg.state === 'active') {
-      pg.trail.unshift({ x: pg.x, y: pg.y });
-      pg.trail.length = Math.min(pg.trail.length, 12);
-    } else {
-      pg.trail = [];
+    const pg = this.playerGhost;
+    if (pg) {
+      if (pg.rush > 0 && pg.state === 'active') {
+        pg.trail.unshift({ x: pg.x, y: pg.y });
+        if (pg.trail.length > 12) pg.trail.length = 12;
+      } else if (pg.trail.length) {
+        pg.trail = [];
+      }
     }
   }
 
@@ -286,10 +358,9 @@ class Game {
 
   // Arcade ghost-house release: dot counters, plus a timer if Pac-Man stops eating.
   updateHouse(dt) {
-    const waiting = this.ghosts.filter(g => g.state === 'house');
     if (this.elroySuspended && !this.ghosts.some(g => g.kind === 'clyde' && g.state === 'house')) this.elroySuspended = false;
-    if (!waiting.length) return;
-    const next = waiting[0];
+    const next = this.ghosts.find(g => g.state === 'house');
+    if (!next) return;
     this.houseIdle += dt;
     let go;
     if (this.globalCounter !== null) {
@@ -311,7 +382,7 @@ class Game {
 
   // Cruise Elroy: Blinky speeds up when few dots remain.
   elroyStage() {
-    if (this.elroySuspended || !this.maze.total) return 0;
+    if (this.elroySuspended || !this.blinky || !this.maze.total) return 0;
     const e1 = byLevel(ELROY_DOTS, this.level);
     return this.maze.left <= e1 / 2 ? 2 : this.maze.left <= e1 ? 1 : 0;
   }
@@ -324,19 +395,18 @@ class Game {
     }
   }
 
-  eat() {
-    const c = Math.floor(this.pac.x), r = Math.floor(this.pac.y);
-    const got = this.maze.take(c, r);
+  eat(pac) {
+    const got = this.maze.take(Math.floor(pac.x), Math.floor(pac.y));
     if (got) {
       this.dotsEaten++;
       this.onDotForHouse();
       if (got === '.') {
-        this.addScore(10);
-        this.pac.stall += 1 / 60;
+        this.addScore(10, pac);
+        pac.stall += 1 / 60;
         Sound.waka();
       } else {
-        this.addScore(50);
-        this.pac.stall += 3 / 60;
+        this.addScore(50, pac);
+        pac.stall += 3 / 60;
         this.frighten();
       }
       if (this.dotsEaten === 70 || this.dotsEaten === 170) {
@@ -344,7 +414,7 @@ class Game {
         this.fruit = { kind, pts: FRUITS[kind].pts, x: FRUIT_SPOT.x, y: FRUIT_SPOT.y, life: 9.33 + Math.random() * 0.67 };
       }
       const treatIndex = TREAT_DOTS.indexOf(this.dotsEaten);
-      if (this.settings.treats && treatIndex >= 0 && !this.treat) {
+      if (this.rules.treats && treatIndex >= 0 && !this.treat) {
         this.treat = new Treat(this, TREAT_ORDER[((this.level - 1) * 2 + treatIndex) % TREAT_ORDER.length]);
         Sound.treatAppear();
       }
@@ -355,8 +425,8 @@ class Game {
         return;
       }
     }
-    if (this.fruit && tileDist(this.pac, this.fruit) < 0.7) {
-      this.addScore(this.fruit.pts);
+    if (this.fruit && tileDist(pac, this.fruit) < 0.7) {
+      this.addScore(this.fruit.pts, pac);
       this.popup(this.fruit.x, this.fruit.y, String(this.fruit.pts), COLOR.pink, 2);
       this.stats.fruit++;
       this.fruit = null;
@@ -368,16 +438,17 @@ class Game {
     const t = this.treat;
     if (!t) return;
     if (t.gone) { this.treat = null; return; }
-    if (tileDist(this.pac, t) < 0.7) {
-      this.addScore(t.pts);
+    for (const p of this.pacs) {
+      if (p.out || tileDist(p, t) >= 0.7) continue;
+      this.addScore(t.pts, p);
       this.popup(t.x, t.y, String(t.pts), COLOR.pink, 2);
       this.stats.treats++;
       this.treat = null;
       Sound.fruit();
       return;
     }
-    const pg = this.ghosts[0];
-    if (pg.state === 'active' && tileDist(pg, t) < 0.7) {
+    const pg = this.playerGhost;
+    if (pg && pg.state === 'active' && tileDist(pg, t) < 0.7) {
       pg.rush = SUGAR_RUSH.time;
       this.popup(t.x, t.y - 0.6, 'SUGAR RUSH!', COLOR.red, 1.6);
       this.stats.rushes++;
@@ -393,62 +464,85 @@ class Game {
     if (time <= 0) return; // from level 17 on, a pellet only turns the ghosts around
     this.powerTime = time;
     this.flashes = byLevel(FRIGHT_FLASHES, this.level);
-    for (const g of this.ghosts) if (!g.isEyes) g.frightened = true;
+    for (const g of this.ghosts) if (!g.isEyes && g.state !== 'waiting') g.frightened = true;
   }
 
   checkCollisions() {
-    for (const g of this.ghosts) {
-      if (g.state !== 'active' || tileDist(this.pac, g) >= HIT_RADIUS) continue;
-      if (g.frightened) {
-        const pts = 200 * 2 ** Math.min(this.chain, 3);
-        this.chain++;
-        this.addScore(pts);
-        this.stats.ghosts++;
-        g.frightened = false;
-        g.state = 'eyes';
-        g.rush = 0;
-        this.popup(g.x, g.y, String(pts), COLOR.cyan, 0.8);
-        this.state = 'freeze';
-        this.freezeTimer = 0.8;
-        this.eatenGhost = g;
-        Sound.eatGhost();
-      } else {
-        this.state = 'dying';
-        this.dieTimer = 0;
-        this.deathSfx = false;
-        this.catches++;
+    for (const p of this.pacs) {
+      if (p.out) continue;
+      for (const g of this.ghosts) {
+        if (g.state !== 'active' || tileDist(p, g) >= HIT_RADIUS) continue;
+        if (g.frightened) {
+          const pts = 200 * 2 ** Math.min(this.chain, 3);
+          this.chain++;
+          this.addScore(pts, p);
+          this.stats.ghosts++;
+          g.frightened = false;
+          g.state = 'eyes';
+          g.rush = 0;
+          this.popup(g.x, g.y, String(pts), COLOR.cyan, 0.8);
+          this.state = 'freeze';
+          this.freezeTimer = 0.8;
+          this.eatenGhost = g;
+          this.eaterPac = p;
+          Sound.eatGhost();
+        } else {
+          this.state = 'dying';
+          this.dieTimer = 0;
+          this.deathSfx = false;
+          this.dyingPac = p;
+          this.catches++;
+        }
+        return;
       }
-      return;
     }
   }
 
   ghostSpeed(g) {
     // Arcade order: the tunnel slowdown wins over everything, then fright, then normal.
     const sp = this.speeds, inTunnel = Math.floor(g.y) === 14 && (g.x < 6 || g.x >= 22);
-    if (!g.isPlayer) return inTunnel ? sp.tunnel : g.frightened ? sp.fright : sp.ai;
-    const edge = (1 + this.settings.boost) * (g.rush > 0 ? SUGAR_RUSH.mult : 1);
+    const stage = g.kind === 'blinky' ? this.elroyStage() : 0;
+    const elroy = stage === 2 ? sp.elroy2 : stage === 1 ? sp.elroy1 : 1;
+    if (!g.isPlayer) return (inTunnel ? sp.tunnel : g.frightened ? sp.fright : sp.ai * elroy) * sp.aiMult;
+    const rush = g.rush > 0 ? SUGAR_RUSH.mult : 1, edge = (1 + this.rules.boost) * rush;
     if (inTunnel) return sp.tunnel * edge;
     if (g.frightened) return sp.fright * edge;
-    const stage = this.elroyStage();
-    return sp.player * (g.rush > 0 ? SUGAR_RUSH.mult : 1) * (stage === 2 ? sp.elroy2 : stage === 1 ? sp.elroy1 : 1);
+    return sp.player * rush * elroy;
+  }
+
+  // The Pac-Man an AI ghost is hunting: whichever is closest.
+  nearestPac(g) {
+    let best = this.pacs[0], bd = Infinity;
+    for (const p of this.pacs) {
+      if (p.out) continue;
+      const d = tileDist(p, g);
+      if (d < bd) { bd = d; best = p; }
+    }
+    return best;
   }
 
   // Classic arcade targeting for the AI-controlled ghosts, including the
   // original bug where "ahead" also shifts left when Pac-Man faces up.
   targetFor(g) {
-    if (this.modeIndex % 2 === 0) return g.info.corner;
-    const p = this.pac, pc = Math.floor(p.x), pr = Math.floor(p.y), d = p.dir;
+    const elroyChase = g.kind === 'blinky' && this.elroyStage() > 0; // Elroy ignores scatter
+    if (this.modeIndex % 2 === 0 && !elroyChase) return g.info.corner;
+    const p = this.nearestPac(g), pc = Math.floor(p.x), pr = Math.floor(p.y), d = p.dir;
     const ahead = n => ({ x: pc + n * d.x - (d === UP ? n : 0), y: pr + n * d.y });
     switch (g.kind) {
       case 'pinky':
         return ahead(4);
       case 'inky': {
-        const b = this.ghosts[0], a = ahead(2);
+        const b = this.blinky || g, a = ahead(2);
         return { x: 2 * a.x - Math.floor(b.x), y: 2 * a.y - Math.floor(b.y) };
       }
       case 'clyde': {
         const dx = Math.floor(g.x) - pc, dy = Math.floor(g.y) - pr;
         return dx * dx + dy * dy > 64 ? { x: pc, y: pr } : g.info.corner;
+      }
+      case 'funky': {
+        // closes in directly from afar, then aims behind Pac-Man to cut off the retreat
+        const dx = Math.floor(g.x) - pc, dy = Math.floor(g.y) - pr;
+        return dx * dx + dy * dy > 64 ? { x: pc, y: pr } : { x: pc - 4 * d.x, y: pr - 4 * d.y };
       }
       default:
         return { x: pc, y: pr };
@@ -467,12 +561,12 @@ class Game {
       case 'title': return 'idle';
       case 'play':
         if (this.powerTime > 0) return 'fright';
-        return this.ghosts[0].rush > 0 ? 'rush' : 'play';
+        return this.playerGhost && this.playerGhost.rush > 0 ? 'rush' : 'play';
       case 'freeze': return 'fright';
       case 'dying': return 'dead';
       case 'clear': return 'clear';
       case 'cutscene': return 'idle';
-      case 'over': return this.winner === 'pac' ? 'win-pac' : 'win-ghost';
+      case 'over': return this.winner === 'pac' || this.winner === 'team' ? 'win-pac' : 'win-ghost';
       default: return 'play';
     }
   }
@@ -485,22 +579,29 @@ class Game {
 
   /* ---------- input ---------- */
 
+  visibleOptions() { return OPTIONS.filter(o => o.show(this.settings)); }
+
   onKey(code, repeat) {
     if (code === 'KeyM') { if (!repeat) Sound.toggleMute(); return; }
     if (code === 'KeyF') { if (!repeat) toggleFullscreen(); return; }
     const isStart = code === 'Enter' || code === 'NumpadEnter' || code === 'Space';
 
     if (this.state === 'title') {
+      const opts = this.visibleOptions();
+      this.menuIndex = Math.min(this.menuIndex, opts.length - 1);
       const dir = GHOST_KEYS[code] || PAC_KEYS[code];
       if (dir === UP || dir === DOWN) {
-        this.menuIndex = (this.menuIndex + dir.y + OPTIONS.length) % OPTIONS.length;
+        this.menuIndex = (this.menuIndex + dir.y + opts.length) % opts.length;
         Sound.menu();
       } else if (dir) {
-        const o = OPTIONS[this.menuIndex];
+        const o = opts[this.menuIndex];
         const i = o.values.indexOf(this.settings[o.key]);
         this.settings[o.key] = o.values[(i + dir.x + o.values.length) % o.values.length];
         store.set(SETTINGS_KEY, this.settings);
+        if (o.key === 'mode') this.onModeChange(this.settings.mode);
         Sound.menu();
+      } else if (code === 'KeyT' && !repeat) {
+        Theme.pick(msg => this.toast(msg));
       } else if (isStart && !repeat) {
         this.newMatch();
       }
@@ -528,8 +629,11 @@ class Game {
       if (code === 'KeyQ') this.toTitle();
       return;
     }
-    if (PAC_KEYS[code]) this.pac.want = PAC_KEYS[code];
-    if (GHOST_KEYS[code] && this.ghosts[0]) this.ghosts[0].want = GHOST_KEYS[code];
+    if (PAC_KEYS[code]) this.pacs[0].want = PAC_KEYS[code];
+    if (GHOST_KEYS[code]) {
+      const p2 = this.coop ? this.pacs[1] : this.playerGhost;
+      if (p2) p2.want = GHOST_KEYS[code];
+    }
   }
 
   toTitle() {
@@ -538,8 +642,9 @@ class Game {
     Sound.stopMusic();
     this.state = 'title';
     this.cutscene = null;
-    store.set('pacvs-hiscore', this.hiscore);
+    this.save();
     Sound.setSiren('off');
+    if (Sound.hasTheme()) Sound.playTheme(true);
   }
 
   pauseIfActive() {
@@ -559,9 +664,9 @@ class Game {
 
   text(str, x, y, color, size = 16, align = 'left') {
     const c = this.ctx;
-    c.font = `${size}px "Press Start 2P", monospace`;
+    const font = size === 16 ? '16px "Press Start 2P", monospace' : `${size}px "Press Start 2P", monospace`;
+    if (font !== this.font) { c.font = font; this.font = font; } // font parsing is the slow part
     c.textAlign = align;
-    c.textBaseline = 'top';
     c.fillStyle = color;
     c.fillText(str, x, y);
   }
@@ -578,10 +683,16 @@ class Game {
 
   pos(a) { return [a.x * T, (a.y + TOP) * T]; }
 
+  pacSprite(p, mouth) {
+    const angle = Math.atan2(p.dir.y, p.dir.x);
+    return p.who === 'ms' ? Sprites.msPac(angle, mouth) : Sprites.pac(angle, mouth);
+  }
+
   render() {
     const c = this.ctx;
     c.setTransform(this.k, 0, 0, this.k, 0, 0);
     c.imageSmoothingEnabled = false;
+    c.textBaseline = 'top';
     c.fillStyle = '#000';
     const boardShown = this.state !== 'title' && this.state !== 'cutscene';
     if (boardShown) {
@@ -607,15 +718,25 @@ class Game {
   drawHUD() {
     const playing = this.state === 'play' || this.state === 'freeze';
     const blink = Math.floor(this.time * 3.5) % 2 === 0;
-    if (!playing || blink) this.text('PAC-MAN', T, 0, COLOR.pac);
-    this.text('HIGH SCORE', 9 * T, 0, COLOR.text);
-    this.text('GHOST', 27 * T, 0, COLOR.red, 16, 'right');
-    this.text(this.score ? String(this.score) : '00', 8 * T, T, COLOR.text, 16, 'right');
-    this.text(this.hiscore ? String(this.hiscore) : '00', 17 * T, T, COLOR.text, 16, 'right');
-    this.text(String(this.catches), 27 * T, T, COLOR.text, 16, 'right');
+    const inMatch = this.state !== 'title';
+    const coop = inMatch && this.coop, separate = coop && !this.sharedScore;
 
-    if (this.state === 'title') return;
-    const goal = this.settings.goal;
+    // left: Pac-Man (or the team), right: the ghost player, Ms. Pac-Man, or catches
+    if (!playing || blink) this.text(coop && !separate ? 'TEAM' : 'PAC-MAN', T, 0, COLOR.pac);
+    this.text('HIGH SCORE', 9 * T, 0, COLOR.text);
+    if (separate) this.text('MS PAC', 27 * T, 0, COLOR.pink, 16, 'right');
+    else this.text(coop ? 'CAUGHT' : 'GHOST', 27 * T, 0, COLOR.red, 16, 'right');
+    const left = separate ? this.pacs[0].score : this.score;
+    this.text(left ? String(left) : '00', 8 * T, T, COLOR.text, 16, 'right');
+    this.text(this.hiscore ? String(this.hiscore) : '00', 17 * T, T, COLOR.text, 16, 'right');
+    const right = separate ? this.pacs[1].score : this.catches;
+    this.text(separate && !right ? '00' : String(right), 27 * T, T, COLOR.text, 16, 'right');
+
+    if (!inMatch) {
+      if (this.toastLife > 0) this.text(this.toastText, WIDTH / 2, 2 * T + 4, COLOR.pink, 8, 'center');
+      return;
+    }
+    const goal = this.rules.goal;
     const news = this.fruitNews;
     if (news && (this.state === 'ready' || this.state === 'play')) {
       const f = FRUITS[news.kind];
@@ -623,16 +744,33 @@ class Game {
     } else {
       this.text(`LEVEL ${this.level}${goal ? ' OF ' + goal : ''}`, WIDTH / 2, 2 * T + 4, COLOR.grey, 8, 'center');
     }
-    if (this.state === 'play' || this.state === 'freeze') {
-      const pg = this.ghosts[0];
+    if (playing) {
+      const pg = this.playerGhost, stage = this.elroyStage();
       if (pg && pg.rush > 0) this.text('SUGAR RUSH', 27 * T, 2 * T + 4, blink ? COLOR.pink : COLOR.red, 8, 'right');
-      else if (this.elroyStage()) this.text(this.elroyStage() === 2 ? 'ELROY 2' : 'ELROY', 27 * T, 2 * T + 4, blink ? COLOR.red : COLOR.text, 8, 'right');
+      else if (stage) this.text(stage === 2 ? 'ELROY 2' : 'ELROY', 27 * T, 2 * T + 4, blink ? COLOR.red : COLOR.text, 8, 'right');
     }
 
-    const icons = Math.min(Math.max(this.lives - 1, 0), 5);
-    for (let i = 0; i < icons; i++) this.blit(Sprites.pac(Math.PI, MOUTHS[2]), (2 + 2 * i) * T, 35 * T);
+    this.drawLives();
     const shown = Math.min(this.level, 7);
     for (let k = 0; k < shown; k++) if (k || !news || blink) this.blit(Sprites.fruit(fruitForLevel(this.level - k)), (26 - 2 * k) * T, 35 * T);
+  }
+
+  drawLives() {
+    const icon = MOUTHS[2], y = 35 * T, ty = 34.5 * T;
+    if (!this.coop) {
+      const icons = Math.min(Math.max(this.lives - 1, 0), 5);
+      for (let i = 0; i < icons; i++) this.blit(Sprites.pac(Math.PI, icon), (2 + 2 * i) * T, y);
+    } else if (this.sharedLives) {
+      this.blit(Sprites.pac(Math.PI, icon), 2 * T, y);
+      this.blit(Sprites.msPac(Math.PI, icon), 3.8 * T, y);
+      this.text('x' + this.lives, 5 * T, ty, COLOR.text);
+    } else {
+      this.pacs.forEach((p, i) => {
+        const x = (2 + i * 5) * T;
+        this.blit(this.pacSprite({ who: p.who, dir: LEFT }, icon), x, y);
+        this.text('x' + p.lives, x + 1.2 * T, ty, p.out ? COLOR.grey : COLOR.text);
+      });
+    }
   }
 
   drawMaze() {
@@ -674,31 +812,27 @@ class Game {
 
     if (!intro && !dyingLate && s !== 'clear') {
       for (const g of this.ghosts) {
-        if (s === 'freeze' && g === this.eatenGhost) continue;
+        if (g.state === 'waiting' || (s === 'freeze' && g === this.eatenGhost)) continue;
         const spr = this.ghostSprite(g, frame);
-        g.trail.forEach((p, i) => {
-          if (i % 3 !== 2) return;
+        for (let i = 2; i < g.trail.length; i += 3) {
           c.globalAlpha = 0.35 - i * 0.025;
-          this.blit(spr, ...this.pos(p));
-        });
+          this.blit(spr, ...this.pos(g.trail[i]));
+        }
         c.globalAlpha = 1;
         this.blit(spr, ...this.pos(g));
       }
     }
 
-    if (!intro && s !== 'freeze') {
-      const [px, py] = this.pos(this.pac);
-      if (dyingLate) {
-        const p = (this.dieTimer - 1) / 1.3;
-        if (p < 1) {
-          const step = Math.round(Math.max(0.05, p) * 12) / 12;
-          this.blit(Sprites.pac(-Math.PI / 2, step * Math.PI), px, py);
-        } else if (p < 1.25) {
-          this.drawPop(px, py);
+    if (!intro) {
+      for (const p of this.pacs) {
+        if (p.out || (s === 'freeze' && p === this.eaterPac)) continue;
+        const [px, py] = this.pos(p);
+        if (dyingLate && p === this.dyingPac) {
+          this.drawDeath(p, px, py, (this.dieTimer - 1) / 1.3);
+        } else {
+          const mouth = s === 'ready' || s === 'clear' ? 0 : p.mouth;
+          this.blit(this.pacSprite(p, mouth), px, py);
         }
-      } else {
-        const mouth = s === 'ready' || s === 'clear' ? 0 : this.pac.mouth;
-        this.blit(Sprites.pac(Math.atan2(this.pac.dir.y, this.pac.dir.x), mouth), px, py);
       }
     }
 
@@ -708,10 +842,27 @@ class Game {
     }
 
     if (s === 'ready' && !intro) {
-      const [px, py] = this.pos(this.pac);
-      this.text('P1', px, py - 26, COLOR.pac, 8, 'center');
-      const [gx, gy] = this.pos(this.ghosts[0]);
-      this.text('P2', gx, gy - 26, COLOR.red, 8, 'center');
+      this.pacs.forEach((p, i) => {
+        if (p.out) return;
+        const [px, py] = this.pos(p);
+        this.text('P' + (i + 1), px, py - 26, p.who === 'ms' ? COLOR.pink : COLOR.pac, 8, 'center');
+      });
+      if (this.playerGhost) {
+        const [gx, gy] = this.pos(this.playerGhost);
+        this.text('P2', gx, gy - 26, COLOR.red, 8, 'center');
+      }
+    }
+  }
+
+  // Pac-Man folds up like the arcade; Ms. Pac-Man spins, as in her own game.
+  drawDeath(p, x, y, t) {
+    if (t >= 1) { if (t < 1.25) this.drawPop(x, y); return; }
+    if (p.who === 'ms') {
+      const dirs = [RIGHT, DOWN, LEFT, UP];
+      this.blit(this.pacSprite({ who: 'ms', dir: dirs[Math.floor(t * 12) % 4] }, MOUTHS[1]), x, y);
+    } else {
+      const step = Math.round(Math.max(0.05, t) * 12) / 12;
+      this.blit(Sprites.pac(-Math.PI / 2, step * Math.PI), x, y);
     }
   }
 
@@ -746,17 +897,38 @@ class Game {
     c.strokeRect(x + 3, y + 3, w - 6, h - 6);
     c.strokeRect(x + 9, y + 9, w - 18, h - 18);
 
-    const pacWon = this.winner === 'pac', endless = !this.settings.goal;
+    const coop = this.coop, endless = !this.rules.goal;
+    const won = this.winner === 'pac' || this.winner === 'team';
     const flash = Math.floor(this.time * 4) % 2 === 0;
-    const headline = endless ? `REACHED LEVEL ${this.level}` : pacWon ? 'PAC-MAN WINS!' : 'GHOST WINS!';
-    this.text(headline, mid, y + 2 * T, flash ? (pacWon || endless ? COLOR.pac : COLOR.red) : '#FFFFFF', 16, 'center');
-    if (pacWon) this.blit(Sprites.pac(0, MOUTHS[Math.floor(this.time * 15) % 4]), mid, y + 4.5 * T);
-    else this.blit(Sprites.ghost(GHOSTS.blinky.color, Math.floor(this.time * 7.5) % 2, LEFT), mid, y + 4.5 * T);
+    const mouth = MOUTHS[Math.floor(this.time * 15) % 4];
+    let headline;
+    if (endless) headline = `REACHED LEVEL ${this.level}`;
+    else if (coop) headline = won ? 'YOU WIN!' : 'GAME OVER';
+    else headline = won ? 'PAC-MAN WINS!' : 'GHOST WINS!';
+    this.text(headline, mid, y + 2 * T, flash ? (won || endless ? COLOR.pac : COLOR.red) : '#FFFFFF', 16, 'center');
+    if (coop) {
+      this.blit(Sprites.pac(0, mouth), mid - T, y + 4.5 * T);
+      this.blit(Sprites.msPac(Math.PI, mouth), mid + T, y + 4.5 * T);
+    } else if (won) {
+      this.blit(Sprites.pac(0, mouth), mid, y + 4.5 * T);
+    } else {
+      this.blit(Sprites.ghost(GHOSTS.blinky.color, Math.floor(this.time * 7.5) % 2, LEFT), mid, y + 4.5 * T);
+    }
 
-    const goal = this.settings.goal, st = this.stats;
-    const rows = [
+    const goal = this.rules.goal, st = this.stats;
+    const levelRow = goal ? ['LEVELS', this.levelsCleared + '/' + goal, COLOR.text] : ['BEST LEVEL', this.bestLevel, COLOR.text];
+    const rows = coop ? [
+      ...(this.sharedScore
+        ? [['TEAM SCORE', this.score, COLOR.pac]]
+        : [['PAC-MAN', this.pacs[0].score, COLOR.pac], ['MS PAC-MAN', this.pacs[1].score, COLOR.pink]]),
+      levelRow,
+      ['GHOSTS EATEN', st.ghosts, COLOR.cyan],
+      ['FRUIT', st.fruit, COLOR.pink],
+      ['TREATS', st.treats, COLOR.pink],
+      ['TIMES CAUGHT', this.catches, COLOR.red],
+    ] : [
       ['SCORE', this.score, COLOR.text],
-      goal ? ['LEVELS', this.levelsCleared + '/' + goal, COLOR.text] : ['BEST LEVEL', this.bestLevel, COLOR.text],
+      levelRow,
       ['GHOSTS EATEN', st.ghosts, COLOR.cyan],
       ['FRUIT', st.fruit, COLOR.pink],
       ['TREATS', st.treats, COLOR.pink],
@@ -772,7 +944,7 @@ class Game {
     if (endless) {
       const best = this.level >= this.bestLevel;
       this.text(best ? 'NEW BEST LEVEL!' : `BEST EVER: LEVEL ${this.bestLevel}`, mid, y + 17.5 * T, best && flash ? COLOR.pac : COLOR.text, 16, 'center');
-    } else {
+    } else if (!coop) {
       this.text('SERIES', mid, y + 17 * T, COLOR.grey, 8, 'center');
       this.text(`PAC ${this.series.pac}  -  ${this.series.ghost} GHOST`, mid, y + 18 * T, COLOR.text, 16, 'center');
     }
@@ -793,34 +965,50 @@ class Game {
   }
 
   drawTitle() {
-    const c = this.ctx, t = this.time, mid = WIDTH / 2;
+    const c = this.ctx, t = this.time, mid = WIDTH / 2, s = this.settings;
+    this.font = '';
     c.font = '32px "Press Start 2P", monospace';
     c.textAlign = 'center';
-    c.textBaseline = 'top';
     c.fillStyle = '#DE5000';
     c.fillText('PAC-MAN', mid + 4, 3 * T + 4);
     c.fillStyle = COLOR.pac;
     c.fillText('PAC-MAN', mid, 3 * T);
     const cycle = [COLOR.red, COLOR.pink, COLOR.cyan, COLOR.orange][Math.floor(t * 2) % 4];
-    this.text('- VERSUS EDITION -', mid, 6 * T, cycle, 16, 'center');
+    this.text(s.mode === 'coop' ? '- CO-OP EDITION -' : '- VERSUS EDITION -', mid, 6 * T, cycle, 16, 'center');
 
     if (Math.floor(t / 9) % 2 === 0) this.drawTitleCharacters(t);
     else this.drawTitleBonus(t);
 
-    OPTIONS.forEach((o, i) => {
-      const row = 22.2 + i * 1.25, sel = i === this.menuIndex, col = sel ? COLOR.pac : COLOR.text;
+    // Five option rows are visible at a time; the list scrolls with the cursor.
+    const opts = this.visibleOptions(), ROWS_SHOWN = 5;
+    this.menuIndex = Math.min(this.menuIndex, opts.length - 1);
+    const top = Math.max(0, Math.min(this.menuIndex - 2, opts.length - ROWS_SHOWN));
+    for (let i = 0; i < Math.min(ROWS_SHOWN, opts.length); i++) {
+      const o = opts[top + i], row = 22.2 + i * 1.25, sel = top + i === this.menuIndex, col = sel ? COLOR.pac : COLOR.text;
       if (sel && Math.floor(t * 4) % 2 === 0) this.text('>', 2 * T, row * T, COLOR.pac);
       this.text(o.label, 4 * T, row * T, col);
-      this.text(o.fmt(this.settings[o.key]), 25 * T, row * T, col, 16, 'right');
-    });
+      this.text(o.fmt(s[o.key]), 25 * T, row * T, col, 16, 'right');
+    }
+    c.fillStyle = COLOR.grey;
+    if (top > 0) this.drawArrow(26.3 * T, 22.4 * T, -1);
+    if (top + ROWS_SHOWN < opts.length) this.drawArrow(26.3 * T, 27.6 * T, 1);
     this.text('UP/DOWN SELECT   LEFT/RIGHT CHANGE', mid, 28.5 * T, COLOR.grey, 8, 'center');
 
     this.text('PAC-MAN', 4 * T, 29.6 * T, COLOR.pac);
     this.text('W A S D', 16 * T, 29.6 * T, COLOR.pac);
-    this.text('GHOST', 4 * T, 30.9 * T, COLOR.red);
-    this.text('ARROWS', 16 * T, 30.9 * T, COLOR.red);
+    if (s.mode === 'coop') this.text('MS PAC-MAN', 4 * T, 30.9 * T, COLOR.pink);
+    else this.text('GHOST', 4 * T, 30.9 * T, COLOR.red);
+    this.text('ARROWS', 16 * T, 30.9 * T, s.mode === 'coop' ? COLOR.pink : COLOR.red);
     if (Math.floor(t * 2.5) % 2 === 0) this.text('PRESS ENTER TO START', mid, 32.5 * T, COLOR.text, 16, 'center');
-    this.text('P PAUSE   M MUTE   F FULLSCREEN', mid, 34.5 * T, COLOR.grey, 8, 'center');
+    this.text('P PAUSE  M MUTE  F FULLSCREEN  T THEME', mid, 34.5 * T, COLOR.grey, 8, 'center');
+  }
+
+  // Small pixel triangle marking more options above (dir -1) or below (dir 1).
+  drawArrow(x, y, dir) {
+    for (let i = 0; i < 4; i++) {
+      const w = 8 - 2 * i;
+      this.ctx.fillRect(x - w / 2, y + (dir > 0 ? i : 3 - i) * 2, w, 2);
+    }
   }
 
   drawTitleCharacters(t) {
@@ -901,15 +1089,24 @@ function toggleFullscreen() {
 (function boot() {
   const canvas = document.getElementById('game');
   const game = new Game(canvas);
-  window.game = game;
+  // read-only handle for debugging and tests
+  Object.defineProperty(window, 'game', { value: game, writable: false, configurable: false });
 
   const bezel = document.getElementById('bezel');
   const lights = document.getElementById('lights');
   const help = document.getElementById('help');
+  const helpP2 = document.getElementById('help-p2');
   const BULB_COLORS = ['#FF0000', '#FFB8FF', '#00FFFF', '#FFB852', '#FFFF00'];
 
+  // The control hint under the cabinet follows the chosen mode (text only, never markup).
+  game.onModeChange = mode => {
+    if (!helpP2) return;
+    helpP2.textContent = mode === 'coop' ? 'MS PAC-MAN: ARROWS' : 'GHOST: ARROWS';
+    helpP2.className = mode === 'coop' ? 'ms' : 'ghost';
+  };
+  game.onModeChange(game.settings.mode);
+
   function layoutBulbs() {
-    lights.innerHTML = '';
     const w = bezel.clientWidth, h = bezel.clientHeight, inset = 7, gap = 20;
     const pts = [];
     const nx = Math.max(2, Math.round((w - 2 * inset) / gap));
@@ -927,10 +1124,11 @@ function toggleFullscreen() {
       b.style.setProperty('--c', BULB_COLORS[i % BULB_COLORS.length]);
       frag.appendChild(b);
     });
-    lights.appendChild(frag);
+    lights.replaceChildren(frag);
   }
 
   // Fill as much of the window as the arcade's 7:9 screen allows.
+  let lastSize = '';
   function fit() {
     document.body.classList.toggle('fullscreen', !!document.fullscreenElement);
     const pad = 2 * 14 + 4; // bezel padding + frame
@@ -938,17 +1136,33 @@ function toggleFullscreen() {
     const availW = window.innerWidth - (document.fullscreenElement ? 0 : 32) - pad;
     const availH = window.innerHeight - helpH - pad - 12;
     const s = Math.max(0.3, Math.min(availW / WIDTH, availH / HEIGHT));
+    const size = Math.floor(WIDTH * s) + 'x' + Math.floor(HEIGHT * s);
     canvas.style.width = Math.floor(WIDTH * s) + 'px';
     canvas.style.height = Math.floor(HEIGHT * s) + 'px';
     game.setScale(Math.min(4, Math.max(1, Math.ceil(s * (window.devicePixelRatio || 1)))));
-    layoutBulbs();
+    if (size !== lastSize) { lastSize = size; layoutBulbs(); }
   }
-  window.addEventListener('resize', fit);
+  let resizeQueued = false;
+  window.addEventListener('resize', () => {
+    if (resizeQueued) return;
+    resizeQueued = true;
+    requestAnimationFrame(() => { resizeQueued = false; fit(); });
+  });
   document.addEventListener('fullscreenchange', fit);
   fit();
 
+  // Theme song: one the player loaded before (this browser only), else sounds/theme.mp3.
+  Theme.onChange = () => {
+    if (game.state === 'title' && !Sound.themePlaying()) Sound.playTheme(true);
+  };
+  Theme.restore();
+  Theme.bundled();
+
   window.addEventListener('keydown', e => {
+    // leave browser and OS shortcuts alone
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     Sound.init();
+    if (game.state === 'title' && Sound.hasTheme() && !Sound.themePlaying()) Sound.playTheme(true);
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
     game.onKey(e.code, e.repeat);
   });

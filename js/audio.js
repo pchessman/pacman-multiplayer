@@ -1,4 +1,5 @@
-/* Pac-Man Versus — synthesized 8-bit sound (Web Audio, no asset files) */
+/* Pac-Man Versus — synthesized 8-bit sound (Web Audio), plus an optional
+   theme song the player supplies themselves (see theme.js). */
 'use strict';
 
 const Sound = (() => {
@@ -13,19 +14,23 @@ const Sound = (() => {
 
   const midi = n => 440 * Math.pow(2, (n - 69) / 12);
 
-  function init() {
-    if (ac) {
-      if (ac.state === 'suspended' && !held) ac.resume();
-      return;
-    }
+  // Creates the context without starting it (decoding works before any key press).
+  function context() {
+    if (ac) return ac;
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
+    if (!AC) return null;
     ac = new AC();
     master = ac.createGain();
     master.gain.value = muted ? 0 : 0.5;
     master.connect(ac.destination);
     music = ac.createGain();
     music.connect(master);
+    return ac;
+  }
+
+  function init() {
+    if (!context()) return;
+    if (ac.state === 'suspended' && !held) ac.resume();
   }
 
   // One enveloped oscillator note, optionally sweeping to `to` Hz.
@@ -181,11 +186,21 @@ const Sound = (() => {
     music.disconnect();
     music = ac.createGain();
     music.connect(master);
+    return ac;
+  }
+
+  function init() {
+    if (!context()) return;
+    if (ac.state === 'suspended' && !held) ac.resume();
   }
 
   // Freeze every sound in place while the game is paused.
   function setPaused(paused) {
     held = paused;
+    if (themeEl && themeElPlaying) {
+      if (paused) themeEl.pause();
+      else themeEl.play().catch(() => {});
+    }
     if (!ac) return;
     if (paused && ac.state === 'running') ac.suspend();
     else if (!paused && ac.state === 'suspended') ac.resume();
@@ -194,11 +209,79 @@ const Sound = (() => {
   function toggleMute() {
     muted = !muted;
     if (master) master.gain.setTargetAtTime(muted ? 0 : 0.5, ac.currentTime, 0.02);
+    if (themeEl) themeEl.muted = muted;
     return muted;
   }
 
+  /* ---------- theme song ---------- */
+  // Two possible sources: an AudioBuffer the player loaded (preferred), or the
+  // bundled <audio> element for sounds/theme.mp3 when the game runs from disk.
+
+  const THEME_VOL = 0.55;
+  let themeBuffer = null, themeSrc = null, themeGain = null;
+  let themeEl = null, themeElPlaying = false, themeFade = 0;
+
+  function decode(bytes) {
+    if (!context()) return Promise.reject(new Error('no audio'));
+    return ac.decodeAudioData(bytes);
+  }
+
+  function setThemeBuffer(buffer) { stopTheme(); themeBuffer = buffer; }
+  function setThemeElement(el) { if (!themeEl) { themeEl = el; el.muted = muted; } }
+  const hasTheme = () => !!(themeBuffer || themeEl);
+  const themePlaying = () => !!themeSrc || themeElPlaying;
+
+  function playTheme(loop) {
+    stopTheme();
+    if (themeBuffer && ac) {
+      themeGain = ac.createGain();
+      themeGain.gain.value = THEME_VOL;
+      themeGain.connect(master);
+      themeSrc = ac.createBufferSource();
+      themeSrc.buffer = themeBuffer;
+      themeSrc.loop = loop;
+      themeSrc.connect(themeGain);
+      const src = themeSrc;
+      src.onended = () => { if (themeSrc === src) themeSrc = null; };
+      themeSrc.start();
+      return true;
+    }
+    if (themeEl) {
+      themeEl.loop = loop;
+      themeEl.volume = THEME_VOL;
+      try { themeEl.currentTime = 0; } catch { /* not seekable yet */ }
+      themeElPlaying = true;
+      themeEl.onended = () => { themeElPlaying = false; };
+      themeEl.play().catch(() => { themeElPlaying = false; });
+      return true;
+    }
+    return false;
+  }
+
+  function fadeTheme(seconds = 0.6) {
+    if (themeSrc && themeGain) {
+      const t = ac.currentTime;
+      themeGain.gain.setTargetAtTime(0, t, seconds / 4);
+      themeSrc.stop(t + seconds);
+      themeSrc = null;
+    } else if (themeEl && themeElPlaying) {
+      clearInterval(themeFade);
+      const el = themeEl, step = el.volume / 10;
+      themeFade = setInterval(() => {
+        el.volume = Math.max(0, el.volume - step);
+        if (el.volume <= 0.001) { clearInterval(themeFade); el.pause(); themeElPlaying = false; }
+      }, (seconds * 1000) / 10);
+    }
+  }
+
+  function stopTheme() {
+    if (themeSrc) { try { themeSrc.stop(); } catch { /* already stopped */ } themeSrc = null; }
+    if (themeEl) { clearInterval(themeFade); themeEl.pause(); themeElPlaying = false; }
+  }
+
   return {
-    init, stopMusic, setPaused, waka, eatGhost, fruit, extraLife, menu, death, intro, intermission, treatAppear, sugarRush, elroy,
+    init, decode, stopMusic, setPaused, setThemeBuffer, setThemeElement, hasTheme, themePlaying, playTheme, fadeTheme, stopTheme,
+    waka, eatGhost, fruit, extraLife, menu, death, intro, intermission, treatAppear, sugarRush, elroy,
     win, lose, setSiren, toggleMute,
     get muted() { return muted; },
   };

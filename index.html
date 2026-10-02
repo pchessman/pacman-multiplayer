@@ -3,6 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Lock-down: only this game's own files may load. No inline or remote code,
+       no network requests, no plugins, no forms, no base-URL tricks. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
   <title>Pac-Man Versus</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -17,7 +21,7 @@
     </div>
     <p id="help">
       <span class="pac">PAC-MAN: W A S D</span>
-      <span class="ghost">GHOST: ARROWS</span>
+      <span class="ghost" id="help-p2">GHOST: ARROWS</span>
       <span>P: PAUSE</span>
       <span>M: MUTE</span>
       <span>F: FULLSCREEN</span>
@@ -28,6 +32,7 @@
   <script src="js/data.js"></script>
   <script src="js/actors.js"></script>
   <script src="js/cutscenes.js"></script>
+  <script src="js/theme.js"></script>
   <script src="js/game.js"></script>
 </body>
 </html>

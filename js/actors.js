@@ -164,12 +164,22 @@ function tileDist(a, b) {
 const CORNER_WINDOW = 0.4; // tiles either side of a center where Pac-Man may cut the corner
 
 class Pacman {
-  constructor(game) { this.game = game; this.reset(); }
+  // start: { who: 'pac' | 'ms', x, y, dir }
+  constructor(game, start = PAC_STARTS.versus[0]) {
+    this.game = game;
+    this.start = start;
+    this.who = start.who;
+    this.score = 0;        // used when co-op points are separate
+    this.lives = 0;        // used when co-op lives are separate
+    this.extraGiven = false;
+    this.out = false;      // out of lives (co-op, separate lives)
+    this.reset();
+  }
 
   reset() {
-    this.x = 14;
-    this.y = 23.5;
-    this.dir = LEFT;
+    this.x = this.start.x;
+    this.y = this.start.y;
+    this.dir = this.start.dir;
     this.want = null;
     this.moving = true;
     this.anim = 0;
@@ -218,6 +228,8 @@ class Pacman {
    Ghosts
    ================================================================ */
 
+const NO_UP_SET = new Set([...NO_UP_TILES].map(k => { const [c, r] = k.split(',').map(Number); return c * 64 + r; }));
+
 class Ghost {
   constructor(game, kind, isPlayer) {
     this.game = game;
@@ -232,7 +244,9 @@ class Ghost {
     this.moving = true;
     this.frightened = false;
     this.path = null;
-    this.state = kind === 'blinky' ? 'active' : 'house';
+    // Blinky starts outside, Funky waits off-screen to enter by a tunnel, the rest wait in the house.
+    this.state = kind === 'blinky' ? 'active' : kind === 'funky' ? 'waiting' : 'house';
+    this.spawnTimer = i.spawnDelay || 0;
     this.bobDir = this.dir === UP ? -1 : 1;
     this.rush = 0;    // sugar-rush seconds left
     this.trail = [];  // recent positions, drawn as afterimages during a sugar rush
@@ -240,7 +254,7 @@ class Ghost {
 
   get isEyes() { return this.state === 'eyes' || this.state === 'entering'; }
 
-  noUp(c, r) { return !this.frightened && NO_UP_TILES.has(`${c},${r}`); }
+  noUp(c, r) { return !this.frightened && NO_UP_SET.has(c * 64 + r); }
 
   release() {
     if (this.state !== 'house') return;
@@ -252,6 +266,17 @@ class Ghost {
     const g = this.game, sp = g.speeds;
     if (this.rush > 0) this.rush = Math.max(0, this.rush - dt);
     switch (this.state) {
+      case 'waiting':
+        this.spawnTimer -= dt;
+        if (this.spawnTimer <= 0) {
+          const fromLeft = Math.random() < 0.5;
+          this.x = fromLeft ? 0.5 : COLS - 0.5;
+          this.y = 14.5;
+          this.dir = fromLeft ? RIGHT : LEFT;
+          this.moving = true;
+          this.state = 'active';
+        }
+        break;
       case 'house':
         this.y += this.bobDir * sp.bob * dt;
         if (this.y <= 14) { this.y = 14; this.bobDir = 1; }

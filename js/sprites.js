@@ -65,6 +65,41 @@ const Sprites = (() => {
     });
   }
 
+  /* ---------- Ms. Pac-Man ---------- */
+
+  const BOW = [[1, 0], [2, 0], [6, 0], [7, 0], [1, 1], [2, 1], [3, 1], [5, 1], [6, 1], [7, 1], [2, 2], [3, 2], [5, 2], [6, 2]];
+  const KNOT = [[4, 1], [4, 2]];
+  // eye + eyelash per facing (right, down, left, up)
+  const MS_EYE = [[[7, 3], [8, 2]], [[3, 7], [2, 8]], [[5, 3], [4, 2]], [[3, 5], [2, 4]]];
+
+  function msPac(angle, mouth) {
+    const key = `ms:${angle.toFixed(2)}:${mouth.toFixed(3)}`;
+    return make(key, 13, 13, put => {
+      const facing = ((Math.round(angle / (Math.PI / 2)) % 4) + 4) % 4; // 0 right, 1 down, 2 left, 3 up
+      const inMouth = (x, y) => {
+        if (mouth <= 0) return false;
+        let a = Math.atan2(y - 6, x - 6) - angle;
+        while (a > Math.PI) a -= 2 * Math.PI;
+        while (a < -Math.PI) a += 2 * Math.PI;
+        return Math.abs(a) < mouth;
+      };
+      const inBody = (x, y) => (x - 6) ** 2 + (y - 6) ** 2 <= 42.25 && !inMouth(x, y);
+      for (let y = 0; y < 13; y++) {
+        for (let x = 0; x < 13; x++) {
+          if (!inBody(x, y)) continue;
+          // red lips where the body meets the open mouth, away from the center
+          const lip = mouth > 0 && (x - 6) ** 2 + (y - 6) ** 2 >= 12 &&
+            [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => inMouth(x + dx, y + dy) && (x + dx - 6) ** 2 + (y + dy - 6) ** 2 <= 42.25);
+          put(x, y, lip ? '#FF0000' : '#FFFF00');
+        }
+      }
+      for (const [x, y] of MS_EYE[facing]) put(x, y, '#000000');
+      const flip = facing === 2;
+      for (const [x, y] of BOW) put(flip ? 12 - x : x, y, '#FF0000');
+      for (const [x, y] of KNOT) put(flip ? 12 - x : x, y, '#2121FF');
+    });
+  }
+
   /* ---------- Ghosts ---------- */
 
   const GHOST_TOP = [
@@ -349,5 +384,5 @@ const Sprites = (() => {
     for (let y = 1; y < 6; y++) put(1, y, '#A0A0A0');
   });
 
-  return { pac, ghost, ghostEyes, frightGhost, dot, pellet, fruit, fruitLocked, treat, tornGhost, patchedGhost, nakedGhost, cloak, nail };
+  return { pac, msPac, ghost, ghostEyes, frightGhost, dot, pellet, fruit, fruitLocked, treat, tornGhost, patchedGhost, nakedGhost, cloak, nail };
 })();

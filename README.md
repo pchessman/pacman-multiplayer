@@ -1,6 +1,6 @@
 # Pac-Man Versus
 
-A two-player, one-keyboard take on the 1980 arcade classic. One player is Pac-Man, the other plays Blinky the ghost. Everything is drawn in 8-bit pixel art on the original 28×31 maze, with flashing power pellets, blue frightened ghosts, a flashing maze when a level is cleared, and chase lights around the cabinet bezel.
+A two-player, one-keyboard take on the 1980 arcade classic. In **VS Ghost** mode one player is Pac-Man and the other plays Blinky the ghost. In **Co-op** mode both players are Pac-Men (Pac-Man and Ms. Pac-Man) working together against the AI ghosts. Everything is drawn in 8-bit pixel art on the original 28×31 maze, with flashing power pellets, blue frightened ghosts, a flashing maze when a level is cleared, and chase lights around the cabinet bezel.
 
 ## Play
 
@@ -9,8 +9,8 @@ Open `index.html` in any modern browser. There's no build step and no server to 
 | Player | Controls |
 | --- | --- |
 | Pac-Man (P1) | `W` `A` `S` `D` |
-| Ghost (P2) | Arrow keys |
-| Both | `P` / `Esc` pause, `M` mute, `F` fullscreen, `Enter` start / rematch |
+| Ghost or Ms. Pac-Man (P2) | Arrow keys |
+| Both | `P` / `Esc` pause, `M` mute, `F` fullscreen, `Enter` start / rematch, `T` load a theme song (title screen) |
 
 Turns are buffered, so you can press a direction early and the character takes it at the next opening.
 
@@ -50,23 +50,58 @@ These follow the 1980 original:
 - **The board fills the window** and stays sharp at any size. Press F for fullscreen. The maze walls are drawn at arcade scale with hard pixel edges, so the curves step slightly like the original's tile graphics.
 - **Light on the CPU.** The walls and dots are baked into one layer that's copied once per frame, eaten dots are erased individually, and the bezel lights animate on the GPU. Pausing also freezes all sound, music included.
 
+## Co-op mode
+
+Pac-Man (WASD) and Ms. Pac-Man (arrows) start on either side of the arcade start spot and clear the maze together. Each AI ghost hunts whichever of them is closer. Two title-screen options set how you share:
+
+- **Lives pool**
+  - *Separate:* each player has their own lives. A player who runs out sits out, and the other keeps going until they're out too.
+  - *Shared:* both players draw from one pool, double the LIVES setting. The game ends when it's empty.
+- **Points**
+  - *Separate:* each player keeps their own score, shown left and right at the top.
+  - *Shared:* both players add to one team score. The 10,000-point extra life follows the same rule, so each player earns their own or the team earns one.
+
+## Extra ghost
+
+Turning on **Extra Ghost** adds a fifth, green ghost (not in the arcade). It slips in through a side tunnel 8 seconds into each round. From far away it heads straight for Pac-Man, and up close it aims a few tiles *behind* him to cut off his escape. It works in both modes.
+
+## Theme song
+
+The game can play a theme song you supply, on the title screen and through the opening "READY!". It fades out when play starts.
+
+- **Running from the folder:** put an MP3 at `sounds/theme.mp3`. The `sounds/` folder is git-ignored, so copyrighted music never ends up in the repository.
+- **Anywhere, including the playable link:** press `T` on the title screen and pick an audio file. It's checked (see Security), saved only in your browser, and reused next time.
+
 ## Options (title screen)
 
 | Option | Values |
 | --- | --- |
-| AI Ghosts | 0–3 extra arcade-AI ghosts (Pinky, Inky, Clyde) |
-| Ghost Speed | +5% to +30% over Pac-Man |
+| Mode | VS Ghost or Co-op |
+| Ghost Speed | VS: the player ghost from −30% to +50% vs Pac-Man (default +15%). Co-op: all AI ghosts from −30% to +50% vs arcade speed |
+| AI Ghosts (VS) / Ghosts (co-op) | VS: 0–3 extra AI ghosts. Co-op: 1–4 AI ghosts (default all four) |
+| Extra Ghost | Adds the fifth, green ghost |
+| Lives Pool, Points (co-op) | Separate or shared |
 | Lives | 1–5 |
 | Level Goal | Endless, or 1, 2, 3, 5, 10 levels |
 | Bonus Treats | On / Off |
 
-Settings and the high score are saved in `localStorage`.
+The menu shows five rows at a time and scrolls. Settings and the high score are saved in `localStorage`.
+
+## Security
+
+- **Locked-down page.** A Content-Security-Policy only lets the game load its own files. It blocks inline or remote scripts, network requests, plugins, forms and `<base>` tricks.
+- **No HTML from data.** The code never builds markup from data (no `innerHTML`, `eval` or `document.write`). Text on the page is set with `textContent` or drawn on the canvas.
+- **Saved data is untrusted.** Settings, high score and best level are checked against the allowed values when read, and anything else is thrown away.
+- **Rule tables are frozen** at startup so they can't be changed at runtime.
+- **Theme files are checked** before use: a size limit (8 MB), an audio type, a real audio signature in the first bytes (MP3, OGG, WAV, FLAC, M4A), and they must decode as audio and be under 3 minutes. The file is only ever handed to the browser's audio decoder and never leaves your browser.
+- **Browser shortcuts are left alone.** Key presses with Ctrl, Cmd or Alt are ignored, so they keep working normally.
 
 ## Files
 
 - `js/data.js`: the maze layout and the arcade's per-level tables
 - `js/actors.js`: maze, grid movement, Pac-Man, ghosts and treats
 - `js/cutscenes.js`: the three intermission acts
+- `js/theme.js`: the optional theme song (file checks, browser-only storage)
 - `js/game.js`: rules, game states, rendering and input
 - `js/sprites.js`: pixel-art sprites at native arcade resolution
 - `js/audio.js`: synthesized Web Audio sound effects and an original chiptune jingle
