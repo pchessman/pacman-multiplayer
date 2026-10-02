@@ -16,8 +16,8 @@ Turns are buffered, so you can press a direction early and the character takes i
 
 ## Rules
 
-- **Pac-Man wins** by clearing the set number of levels before running out of lives.
-- **The ghost wins** by catching Pac-Man until all lives are gone.
+- **Endless (default).** Levels never stop. The ghost's job is to end the run, and Pac-Man's is to get as far as possible. The results screen shows the level reached and your best ever. Unlike the arcade, there's no level-256 "split screen" crash, so the game keeps going.
+- **Level goal (optional).** Set 1–10 levels on the title screen for a head-to-head match. Pac-Man wins by clearing that many levels, and the ghost wins by taking all his lives. These matches count toward the series score.
 - The player ghost is faster than Pac-Man by a configurable margin (default +15%). It is slowed in the side tunnels, as in the arcade.
 - Power pellets turn ghosts blue and slow them down. Eaten ghosts float back to the house as eyes and respawn.
 - Dots are 10 points, pellets 50, ghosts 200 / 400 / 800 / 1600 in a chain. You get one extra life at 10,000 points.
@@ -34,7 +34,7 @@ These follow the 1980 original:
 - **Ghost-house release** uses the arcade's per-ghost dot counters. After a death they switch to a shared counter, and a ghost is also released if Pac-Man stops eating for a few seconds.
 - **Per-level tables.** Speeds, fright time and flash count, scatter/chase timing, Elroy thresholds and fruit all change by level.
 - **AI ghosts** (optional) use the classic targeting, including Pinky's and Inky's famous "up" bug.
-- **Fruit** appears below the ghost house after 70 and 170 dots:
+- **Fruit** appears below the ghost house after 70 and 170 dots and stays 9–10 seconds. Each level has one fixed fruit, and some repeat. The counter in the bottom right shows the current level's fruit plus the previous six, like the arcade. A new fruit kind first appears on levels 1, 2, 3, 5, 7, 9, 11 and 13. Fruit you haven't reached yet shows as a locked silhouette on the title screen, and a `NEW FRUIT` callout appears when you reach one.
 
   | Fruit | Cherry | Strawberry | Orange | Apple | Melon | Galaxian | Bell | Key |
   | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -56,7 +56,7 @@ These follow the 1980 original:
 | AI Ghosts | 0–3 extra arcade-AI ghosts (Pinky, Inky, Clyde) |
 | Ghost Speed | +5% to +30% over Pac-Man |
 | Lives | 1–5 |
-| Levels to Win | 1, 2, 3, 5 or Endless |
+| Level Goal | Endless, or 1, 2, 3, 5, 10 levels |
 | Bonus Treats | On / Off |
 
 Settings and the high score are saved in `localStorage`.

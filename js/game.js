@@ -10,8 +10,10 @@ class Game {
     this.maze = new Maze();
     this.eyesMap = distanceMap(this.maze, [[13, 11]]);
     this.exitMap = distanceMap(this.maze, [[0, 14], [COLS - 1, 14]]);
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, store.get('pacvs-settings', {}));
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, store.get(SETTINGS_KEY, {}));
     this.hiscore = store.get('pacvs-hiscore', 0);
+    this.bestLevel = store.get('pacvs-best-level', 1); // furthest level ever reached; unlocks fruit on the title page
+    this.fruitNews = null;
     this.series = { pac: 0, ghost: 0 };
     this.menuIndex = 0;
     this.time = 0;
@@ -66,6 +68,15 @@ class Game {
   }
 
   startLevel(first) {
+    const kind = fruitForLevel(this.level);
+    this.fruitNews = null;
+    if (fruitUnlockLevel(kind) === this.level) {
+      this.fruitNews = { kind, isNew: this.level > this.bestLevel, life: 7 };
+    }
+    if (this.level > this.bestLevel) {
+      this.bestLevel = this.level;
+      store.set('pacvs-best-level', this.bestLevel);
+    }
     this.maze.reset();
     this.dotsEaten = 0;
     this.speeds = computeSpeeds(this.level, this.settings.boost);
@@ -97,7 +108,7 @@ class Game {
     this.state = 'over';
     this.winner = winner;
     this.overTimer = 0;
-    this.series[winner]++;
+    if (this.settings.goal) this.series[winner]++;
     store.set('pacvs-hiscore', this.hiscore);
     if (winner === 'pac') Sound.win(); else Sound.lose();
   }
@@ -121,6 +132,10 @@ class Game {
   update(dt) {
     if (this.paused) { this.setLights('pause'); return; }
     this.time += dt;
+    if (this.fruitNews && (this.state === 'ready' || this.state === 'play')) {
+      this.fruitNews.life -= dt;
+      if (this.fruitNews.life <= 0) this.fruitNews = null;
+    }
     switch (this.state) {
       case 'ready':
         this.readyTimer -= dt;
@@ -443,7 +458,7 @@ class Game {
         const o = OPTIONS[this.menuIndex];
         const i = o.values.indexOf(this.settings[o.key]);
         this.settings[o.key] = o.values[(i + dir.x + o.values.length) % o.values.length];
-        store.set('pacvs-settings', this.settings);
+        store.set(SETTINGS_KEY, this.settings);
         Sound.menu();
       } else if (isStart && !repeat) {
         this.newMatch();
@@ -545,7 +560,13 @@ class Game {
 
     if (this.state === 'title') return;
     const goal = this.settings.goal;
-    this.text(`LEVEL ${this.level}${goal ? ' OF ' + goal : ''}`, WIDTH / 2, 2 * T + 4, COLOR.grey, 8, 'center');
+    const news = this.fruitNews;
+    if (news && (this.state === 'ready' || this.state === 'play')) {
+      const f = FRUITS[news.kind];
+      this.text(`${news.isNew ? 'NEW FRUIT' : 'FRUIT'}: ${f.name} ${f.pts}`, WIDTH / 2, 2 * T + 4, blink ? COLOR.pink : COLOR.text, 8, 'center');
+    } else {
+      this.text(`LEVEL ${this.level}${goal ? ' OF ' + goal : ''}`, WIDTH / 2, 2 * T + 4, COLOR.grey, 8, 'center');
+    }
     if (this.state === 'play' || this.state === 'freeze') {
       const pg = this.ghosts[0];
       if (pg && pg.rush > 0) this.text('SUGAR RUSH', 27 * T, 2 * T + 4, blink ? COLOR.pink : COLOR.red, 8, 'right');
@@ -555,7 +576,7 @@ class Game {
     const icons = Math.min(Math.max(this.lives - 1, 0), 5);
     for (let i = 0; i < icons; i++) this.blit(Sprites.pac(Math.PI, MOUTHS[2]), (2 + 2 * i) * T, 35 * T);
     const shown = Math.min(this.level, 7);
-    for (let k = 0; k < shown; k++) this.blit(Sprites.fruit(fruitForLevel(this.level - k)), (26 - 2 * k) * T, 35 * T);
+    for (let k = 0; k < shown; k++) if (k || !news || blink) this.blit(Sprites.fruit(fruitForLevel(this.level - k)), (26 - 2 * k) * T, 35 * T);
   }
 
   drawMaze() {
@@ -675,16 +696,17 @@ class Game {
     c.strokeRect(x + 3, y + 3, w - 6, h - 6);
     c.strokeRect(x + 9, y + 9, w - 18, h - 18);
 
-    const pacWon = this.winner === 'pac';
+    const pacWon = this.winner === 'pac', endless = !this.settings.goal;
     const flash = Math.floor(this.time * 4) % 2 === 0;
-    this.text(pacWon ? 'PAC-MAN WINS!' : 'GHOST WINS!', mid, y + 2 * T, flash ? (pacWon ? COLOR.pac : COLOR.red) : '#FFFFFF', 16, 'center');
+    const headline = endless ? `REACHED LEVEL ${this.level}` : pacWon ? 'PAC-MAN WINS!' : 'GHOST WINS!';
+    this.text(headline, mid, y + 2 * T, flash ? (pacWon || endless ? COLOR.pac : COLOR.red) : '#FFFFFF', 16, 'center');
     if (pacWon) this.blit(Sprites.pac(0, MOUTHS[Math.floor(this.time * 15) % 4]), mid, y + 4.5 * T);
     else this.blit(Sprites.ghost(GHOSTS.blinky.color, Math.floor(this.time * 7.5) % 2, LEFT), mid, y + 4.5 * T);
 
     const goal = this.settings.goal, st = this.stats;
     const rows = [
       ['SCORE', this.score, COLOR.text],
-      ['LEVELS', this.levelsCleared + (goal ? '/' + goal : ''), COLOR.text],
+      goal ? ['LEVELS', this.levelsCleared + '/' + goal, COLOR.text] : ['BEST LEVEL', this.bestLevel, COLOR.text],
       ['GHOSTS EATEN', st.ghosts, COLOR.cyan],
       ['FRUIT', st.fruit, COLOR.pink],
       ['TREATS', st.treats, COLOR.pink],
@@ -697,8 +719,13 @@ class Game {
       this.text(String(v), x + w - 2.5 * T, ry, COLOR.text, 16, 'right');
     });
 
-    this.text('SERIES', mid, y + 17 * T, COLOR.grey, 8, 'center');
-    this.text(`PAC ${this.series.pac}  -  ${this.series.ghost} GHOST`, mid, y + 18 * T, COLOR.text, 16, 'center');
+    if (endless) {
+      const best = this.level >= this.bestLevel;
+      this.text(best ? 'NEW BEST LEVEL!' : `BEST EVER: LEVEL ${this.bestLevel}`, mid, y + 17.5 * T, best && flash ? COLOR.pac : COLOR.text, 16, 'center');
+    } else {
+      this.text('SERIES', mid, y + 17 * T, COLOR.grey, 8, 'center');
+      this.text(`PAC ${this.series.pac}  -  ${this.series.ghost} GHOST`, mid, y + 18 * T, COLOR.text, 16, 'center');
+    }
     if (this.overTimer > 1.5 && flash) this.text('ENTER  REMATCH', mid, y + 20.5 * T, COLOR.pac, 16, 'center');
     this.text('ESC  MENU', mid, y + 22.3 * T, COLOR.grey, 8, 'center');
   }
@@ -765,9 +792,14 @@ class Game {
     const mid = WIDTH / 2;
     this.text('- BONUS FRUIT -', mid, 8 * T, COLOR.text, 16, 'center');
     FRUIT_ORDER.forEach((k, i) => {
-      const x = i < 4 ? 3 : 15, row = 10 + (i % 4) * 1.75;
-      this.blit(Sprites.fruit(k), (x + 0.5) * T, (row + 0.5) * T);
-      this.text(`${FRUITS[k].pts} PTS`, (x + 2) * T, row * T, COLOR.text);
+      const x = i < 4 ? 3 : 15, row = 10 + (i % 4) * 1.75, unlockAt = fruitUnlockLevel(k);
+      if (unlockAt <= this.bestLevel) {
+        this.blit(Sprites.fruit(k), (x + 0.5) * T, (row + 0.5) * T);
+        this.text(`${FRUITS[k].pts} PTS`, (x + 2) * T, row * T, COLOR.text);
+      } else {
+        this.blit(Sprites.fruitLocked(k), (x + 0.5) * T, (row + 0.5) * T);
+        this.text(`LEVEL ${unlockAt}`, (x + 2) * T, row * T, COLOR.grey);
+      }
     });
     this.text('TREATS ROAM THE MAZE', mid, 17.4 * T, COLOR.pink, 16, 'center');
     TREAT_ORDER.forEach((k, i) => {

@@ -275,6 +275,9 @@ const Sprites = (() => {
 
   const fruit = kind => make(`fruit:${kind}`, 12, 12, FRUIT_PAINTERS[kind]);
 
+  // Dark silhouette for fruit the players haven't reached yet.
+  const fruitLocked = kind => make(`fruit-locked:${kind}`, 12, 12, put => FRUIT_PAINTERS[kind]((x, y) => put(x, y, '#2A2A55')));
+
   /* ---------- Bonus treats (12x12) ---------- */
 
   const TREAT_PAINTERS = {
@@ -346,5 +349,5 @@ const Sprites = (() => {
     for (let y = 1; y < 6; y++) put(1, y, '#A0A0A0');
   });
 
-  return { pac, ghost, ghostEyes, frightGhost, dot, pellet, fruit, treat, tornGhost, patchedGhost, nakedGhost, cloak, nail };
+  return { pac, ghost, ghostEyes, frightGhost, dot, pellet, fruit, fruitLocked, treat, tornGhost, patchedGhost, nakedGhost, cloak, nail };
 })();

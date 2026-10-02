@@ -70,14 +70,14 @@ const GHOST_ORDER = ['blinky', 'pinky', 'inky', 'clyde'];
 /* ---------- arcade level tables (index = level - 1, last entry repeats) ---------- */
 
 const FRUITS = {
-  cherry:     { pts: 100 },
-  strawberry: { pts: 300 },
-  orange:     { pts: 500 },
-  apple:      { pts: 700 },
-  melon:      { pts: 1000 },
-  galaxian:   { pts: 2000 },
-  bell:       { pts: 3000 },
-  key:        { pts: 5000 },
+  cherry:     { pts: 100,  name: 'CHERRY' },
+  strawberry: { pts: 300,  name: 'STRAWBERRY' },
+  orange:     { pts: 500,  name: 'ORANGE' },
+  apple:      { pts: 700,  name: 'APPLE' },
+  melon:      { pts: 1000, name: 'MELON' },
+  galaxian:   { pts: 2000, name: 'GALAXIAN' },
+  bell:       { pts: 3000, name: 'BELL' },
+  key:        { pts: 5000, name: 'KEY' },
 };
 const FRUIT_ORDER = Object.keys(FRUITS);
 const FRUIT_BY_LEVEL = ['cherry', 'strawberry', 'orange', 'orange', 'apple', 'apple', 'melon', 'melon',
@@ -103,7 +103,10 @@ const HOUSE_GLOBAL_LIMITS = { pinky: 7, inky: 17, clyde: 32 };
 const INTERMISSIONS = { 2: 1, 5: 2, 9: 3, 13: 3, 17: 3 };
 
 const byLevel = (table, level) => table[Math.min(level, table.length) - 1];
+// Arcade rule: each level has one fixed bonus fruit. A new kind first shows up
+// on levels 1, 2, 3, 5, 7, 9, 11 and 13; in between, the previous one repeats.
 const fruitForLevel = level => byLevel(FRUIT_BY_LEVEL, level);
+const fruitUnlockLevel = kind => FRUIT_BY_LEVEL.indexOf(kind) + 1;
 const modeTimesFor = level => MODE_TIMES[level === 1 ? 0 : level < 5 ? 1 : 2];
 const houseLimitsFor = level => HOUSE_DOT_LIMITS[Math.min(level, 3) - 1];
 
@@ -147,10 +150,11 @@ const OPTIONS = [
   { key: 'ai',     label: 'AI GHOSTS',     values: [0, 1, 2, 3],                      fmt: v => String(v) },
   { key: 'boost',  label: 'GHOST SPEED',   values: [0.05, 0.1, 0.15, 0.2, 0.25, 0.3], fmt: v => '+' + Math.round(v * 100) + '%' },
   { key: 'lives',  label: 'LIVES',         values: [1, 2, 3, 4, 5],                   fmt: v => String(v) },
-  { key: 'goal',   label: 'LEVELS TO WIN', values: [1, 2, 3, 5, 0],                   fmt: v => (v ? String(v) : 'ENDLESS') },
+  { key: 'goal',   label: 'LEVEL GOAL',    values: [0, 1, 2, 3, 5, 10],               fmt: v => (v ? String(v) : 'ENDLESS') },
   { key: 'treats', label: 'BONUS TREATS',  values: [true, false],                     fmt: v => (v ? 'ON' : 'OFF') },
 ];
-const DEFAULT_SETTINGS = { ai: 0, boost: 0.15, lives: 3, goal: 3, treats: true };
+const DEFAULT_SETTINGS = { ai: 0, boost: 0.15, lives: 3, goal: 0, treats: true };
+const SETTINGS_KEY = 'pacvs-settings-v2';
 
 const MOUTHS = [0, 0.16, 0.3, 0.16].map(m => m * Math.PI);
 
