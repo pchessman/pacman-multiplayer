@@ -31,6 +31,16 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # Android 17 (API 37). The Android Gradle plugin can fetch it too, but asking
+      # for it up front gives a clearer error if the package name ever changes.
+      - name: Android 17 SDK platform
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKM" --list 2>/dev/null | grep -E "platforms;android-3[6-9]" | sort -u | head -n 10 || true
+          timeout 300 "$SDKM" --install "platforms;android-37.0" \
+            || timeout 300 "$SDKM" --install "platforms;android-37" \
+            || echo "platform not pre-installed; the Gradle plugin will download it"
+
       # Optional: a stable signing key, so new versions install over old ones
       # (and keep high scores). Without these secrets the APK is signed with a
       # throwaway debug key, which is fine for a first install.
@@ -56,11 +66,14 @@ jobs:
         run: |
           APK=$(ls android/app/build/outputs/apk/release/*.apk | head -n1)
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n1)
-          "$BT/aapt2" dump badging "$APK" | grep -E "package:|leanback|launchable-activity|uses-permission" || true
+          "$BT/aapt2" dump badging "$APK" | grep -E "package:|sdkVersion|leanback|launchable-activity|uses-permission" || true
+          # built for Android 17
+          "$BT/aapt2" dump badging "$APK" | grep -q "targetSdkVersion:'37'"
           "$BT/apksigner" verify --print-certs "$APK" | head -n 3
           # the game files must be inside the APK, and the app must not ask for the network
           unzip -l "$APK" | grep -q "assets/www/index.html"
           unzip -l "$APK" | grep -q "assets/www/js/input.js"
+          unzip -l "$APK" | grep -q "assets/www/js/controls.js"
           if "$BT/aapt2" dump permissions "$APK" | grep -q "android.permission.INTERNET"; then echo "unexpected INTERNET permission"; exit 1; fi
           mv "$APK" PacManVersus-TV.apk
 

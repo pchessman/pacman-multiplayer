@@ -52,8 +52,9 @@ const DIR_ORDER = [UP, LEFT, DOWN, RIGHT]; // arcade tie-break order
 const OPP = new Map([[UP, DOWN], [DOWN, UP], [LEFT, RIGHT], [RIGHT, LEFT]]);
 const wrapCol = c => ((c % COLS) + COLS) % COLS;
 
-const PAC_KEYS = { KeyW: UP, KeyA: LEFT, KeyS: DOWN, KeyD: RIGHT };
-const GHOST_KEYS = { ArrowUp: UP, ArrowLeft: LEFT, ArrowDown: DOWN, ArrowRight: RIGHT };
+const DIR_BY_NAME = { up: UP, down: DOWN, left: LEFT, right: RIGHT };
+// Menus always answer to the arrows and W A S D, whatever the players have bound.
+const MENU_KEYS = { KeyW: 'up', KeyA: 'left', KeyS: 'down', KeyD: 'right', ArrowUp: 'up', ArrowLeft: 'left', ArrowDown: 'down', ArrowRight: 'right' };
 
 const DOOR = { x: 14, y: 11.5 };  // spot just above the ghost-house door
 const HOUSE_Y = 14.5;
@@ -230,4 +231,4 @@ function deepFreeze(o) {
 }
 [LAYOUT, GHOSTS, GHOST_ORDER, PAC_STARTS, FRUITS, FRUIT_ORDER, FRUIT_BY_LEVEL, FRIGHT_TIME, FRIGHT_FLASHES, ELROY_DOTS,
   MODE_TIMES, HOUSE_DOT_LIMITS, HOUSE_GLOBAL_LIMITS, INTERMISSIONS, TREATS, TREAT_ORDER, TREAT_DOTS, SUGAR_RUSH,
-  OPTIONS, DEFAULT_SETTINGS, MOUTHS, MODE_NAMES, MODE_BLURBS, DUEL, COLOR, PAC_KEYS, GHOST_KEYS, DOOR, FRUIT_SPOT, DIR_ORDER].forEach(deepFreeze);
+  OPTIONS, DEFAULT_SETTINGS, MOUTHS, MODE_NAMES, MODE_BLURBS, DUEL, COLOR, DIR_BY_NAME, MENU_KEYS, DOOR, FRUIT_SPOT, DIR_ORDER].forEach(deepFreeze);

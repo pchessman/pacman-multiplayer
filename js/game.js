@@ -6,6 +6,8 @@
 
 // Set by the Android TV app (index.html?tv=1): controller-first hints, TV-friendly rendering.
 const TV_MODE = new URLSearchParams(location.search).get('tv') === '1';
+// The last row of the title menu: opens the CONTROLS screen instead of changing a setting.
+const CONTROLS_ROW = Object.freeze({ key: 'controls', label: 'CONTROLS', fmt: () => 'SETUP', values: Object.freeze([]) });
 
 class Game {
   constructor(canvas) {
@@ -74,8 +76,13 @@ class Game {
       g.fillRect(c * T + T / 2 - 2, r * T + T / 2 - 2, 4, 4);
     };
 
+    this.controlsScreen = new ControlsScreen(this);
+    this.iris = null;      // the Pac-Man iris transition, while one is running
+    this.card = null;      // the level card shown inside it
+    this.loader = null;
+    this.fontReady = false;
     this.setScale(1);
-    this.state = 'title';
+    this.state = 'loading';
   }
 
   get pac() { return this.pacs[0]; }
@@ -159,6 +166,10 @@ class Game {
     this.resetActors();
     this.state = 'ready';
     this.readyTimer = first ? 4.3 : 3;
+    // the board opens out of a Pac-Man silhouette, with the level card on the black
+    const [ix, iy] = this.pos(this.pacs.find(p => !p.out) || this.pac);
+    this.iris = new Iris('open', ix, iy, 0.8, first ? 0.7 : 0.5);
+    this.card = { level: this.level, kind };
     if (first) {
       if (Sound.hasTheme()) { if (!Sound.themePlaying()) Sound.playTheme(false); }
       else Sound.intro();
@@ -242,7 +253,17 @@ class Game {
       this.fruitNews.life -= dt;
       if (this.fruitNews.life <= 0) this.fruitNews = null;
     }
+    if (this.iris) {
+      this.iris.update(dt);
+      if (this.iris.done) this.iris = null;
+    }
     switch (this.state) {
+      case 'loading':
+        if (this.loader && this.loader.update(dt)) this.finishLoading();
+        break;
+      case 'controls':
+        this.controlsScreen.update(dt);
+        break;
       case 'ready':
         this.readyTimer -= dt;
         if (this.readyTimer <= 0) {
@@ -265,6 +286,12 @@ class Game {
         break;
       case 'clear':
         this.clearTimer += dt;
+        // close the iris on Pac-Man before the next level opens it again
+        if (this.clearTimer >= 2.5 && !this.iris && !INTERMISSIONS[this.level] &&
+            !(this.rules.goal && this.levelsCleared >= this.rules.goal)) {
+          const [x, y] = this.pos(this.pacs.find(p => !p.out) || this.pac);
+          this.iris = new Iris('close', x, y, 0.45);
+        }
         if (this.clearTimer >= 3) {
           const act = INTERMISSIONS[this.level];
           if (this.rules.goal && this.levelsCleared >= this.rules.goal) {
@@ -630,7 +657,7 @@ class Game {
 
   lightMode() {
     switch (this.state) {
-      case 'title': return 'idle';
+      case 'title': case 'loading': case 'controls': return 'idle';
       case 'play':
         if (this.powerTime > 0) return 'fright';
         return this.playerGhost && this.playerGhost.rush > 0 ? 'rush' : 'play';
@@ -651,32 +678,71 @@ class Game {
 
   /* ---------- input ---------- */
 
-  visibleOptions() { return OPTIONS.filter(o => o.show(this.settings)); }
+  // The title menu: the game options, plus a row that opens the CONTROLS screen.
+  visibleOptions() { return [...OPTIONS.filter(o => o.show(this.settings)), CONTROLS_ROW]; }
+
+  // A direction from a player: their bound keys or their own controller.
+  onDir(slot, dir) {
+    if (this.state === 'loading') return;
+    if (this.state === 'controls') { this.controlsScreen.dir(slot, dir); return; }
+    if (this.state === 'title') { this.menuNav(dir); return; }
+    if (this.paused || this.state === 'over' || this.state === 'cutscene') return;
+    const d = DIR_BY_NAME[dir];
+    if (slot === 0) this.pacs[0].want = d;
+    else {
+      const p2 = this.twoPac ? this.pacs[1] : this.playerGhost;
+      if (p2) p2.want = d;
+    }
+  }
+
+  menuNav(dir) {
+    const opts = this.visibleOptions();
+    this.menuIndex = Math.min(this.menuIndex, opts.length - 1);
+    if (dir === 'up' || dir === 'down') {
+      this.menuIndex = (this.menuIndex + (dir === 'down' ? 1 : -1) + opts.length) % opts.length;
+      Sound.menu();
+      return;
+    }
+    const o = opts[this.menuIndex];
+    if (o === CONTROLS_ROW) return;
+    const i = o.values.indexOf(this.settings[o.key]);
+    this.settings[o.key] = o.values[(i + (dir === 'right' ? 1 : -1) + o.values.length) % o.values.length];
+    store.set(SETTINGS_KEY, this.settings);
+    if (o.key === 'mode') this.onModeChange(this.settings.mode);
+    Sound.menu();
+  }
+
+  confirmTitle() {
+    if (this.visibleOptions()[this.menuIndex] === CONTROLS_ROW) this.openControls();
+    else this.newMatch();
+  }
+
+  openControls() {
+    this.state = 'controls';
+    this.controlsScreen.open();
+    Sound.menu();
+  }
+
+  closeControls() {
+    this.state = 'title';
+    this.iris = new Iris('open', WIDTH / 2, HEIGHT / 2, 0.35);
+    Sound.menu();
+  }
 
   onKey(code, repeat) {
+    if (this.state === 'loading') { if (!repeat) this.skipLoading(); return; }
+    if (this.state === 'controls') { this.controlsScreen.key(code, repeat); return; }
     if (code === 'KeyM') { if (!repeat) Sound.toggleMute(); return; }
     if (code === 'KeyF') { if (!repeat) toggleFullscreen(); return; }
     const isStart = code === 'Enter' || code === 'NumpadEnter' || code === 'Space';
+    const bound = Controls.keyDir(code);
 
     if (this.state === 'title') {
-      const opts = this.visibleOptions();
-      this.menuIndex = Math.min(this.menuIndex, opts.length - 1);
-      const dir = GHOST_KEYS[code] || PAC_KEYS[code];
-      if (dir === UP || dir === DOWN) {
-        this.menuIndex = (this.menuIndex + dir.y + opts.length) % opts.length;
-        Sound.menu();
-      } else if (dir) {
-        const o = opts[this.menuIndex];
-        const i = o.values.indexOf(this.settings[o.key]);
-        this.settings[o.key] = o.values[(i + dir.x + o.values.length) % o.values.length];
-        store.set(SETTINGS_KEY, this.settings);
-        if (o.key === 'mode') this.onModeChange(this.settings.mode);
-        Sound.menu();
-      } else if (code === 'KeyT' && !repeat) {
-        Theme.pick(msg => this.toast(msg));
-      } else if (isStart && !repeat) {
-        this.newMatch();
-      }
+      const nav = bound ? bound.dir : MENU_KEYS[code];
+      if (nav) this.menuNav(nav);
+      else if (code === 'KeyT' && !repeat) Theme.pick(msg => this.toast(msg));
+      else if (code === 'KeyC' && !repeat) this.openControls();
+      else if (isStart && !repeat) this.confirmTitle();
       return;
     }
 
@@ -693,19 +759,24 @@ class Game {
     }
 
     if ((code === 'KeyP' || code === 'Escape') && !repeat) {
-      this.paused = !this.paused;
-      Sound.setPaused(this.paused);
+      this.togglePause();
       return;
     }
     if (this.paused) {
       if (code === 'KeyQ') this.toTitle();
       return;
     }
-    if (PAC_KEYS[code]) this.pacs[0].want = PAC_KEYS[code];
-    if (GHOST_KEYS[code]) {
-      const p2 = this.twoPac ? this.pacs[1] : this.playerGhost;
-      if (p2) p2.want = GHOST_KEYS[code];
-    }
+    if (bound) this.onDir(bound.slot, bound.dir);
+  }
+
+  togglePause() {
+    this.paused = !this.paused;
+    Sound.setPaused(this.paused);
+  }
+
+  // True while a match is being played (not on a menu, a pause or a cutscene).
+  get inPlay() {
+    return ['ready', 'play', 'freeze', 'dying', 'clear'].includes(this.state) && !this.paused;
   }
 
   toTitle() {
@@ -714,24 +785,39 @@ class Game {
     Sound.stopMusic();
     this.state = 'title';
     this.cutscene = null;
+    this.iris = null;
     this.save();
     Sound.setSiren('off');
     if (Sound.hasTheme()) Sound.playTheme(true);
   }
 
-  // Controller buttons (see input.js). Directions arrive as the owning player's keys.
-  //   A: start / confirm / resume   B: back   MENU: pause   VIEW: mute
-  onPadButton(name) {
+  // Raw controller buttons go to the CONTROLS screen when it's up (testing and binding).
+  onPadRaw(slot, name, down) {
+    return this.state === 'controls' && this.controlsScreen.raw(slot, name, down);
+  }
+
+  // A controller button, already turned into an action by that player's bindings.
+  onPadAction(action, slot) {
     const s = this.state;
-    if (name === 'view') { this.onKey('KeyM', false); return; }
-    if (name === 'menu') { if (!['title', 'over', 'cutscene'].includes(s)) this.onKey('KeyP', false); return; }
-    if (name === 'a') { this.onKey(this.paused ? 'KeyP' : 'Enter', false); return; }
-    if (name === 'b') this.back();
+    if (s === 'loading') { this.skipLoading(); return; }
+    switch (action) {
+      case 'mute': Sound.toggleMute(); break;
+      case 'pause': if (!['title', 'over', 'cutscene'].includes(s)) this.togglePause(); break;
+      case 'controls': if (s === 'title') this.openControls(); break;
+      case 'back': this.back(); break;
+      case 'confirm':
+        if (this.paused) this.togglePause();
+        else if (s === 'title') this.confirmTitle();
+        else this.onKey('Enter', false);
+        break;
+    }
   }
 
   // B on a controller, or the TV remote's Back. Returns 'exit' on the title screen
   // so the TV app knows to close.
   back() {
+    if (this.state === 'loading') return 'ok';
+    if (this.state === 'controls') { this.controlsScreen.back(); return 'ok'; }
     if (this.state === 'title') return 'exit';
     if (this.paused) this.onKey('KeyQ', false);
     else if (this.state === 'over') this.onKey('Escape', false);
@@ -786,8 +872,9 @@ class Game {
     c.setTransform(this.k, 0, 0, this.k, 0, 0);
     c.imageSmoothingEnabled = false;
     c.textBaseline = 'top';
+    if (this.state === 'loading') { this.loader.draw(); return; }
     c.fillStyle = '#000';
-    const boardShown = this.state !== 'title' && this.state !== 'cutscene';
+    const boardShown = !['title', 'cutscene', 'controls'].includes(this.state);
     if (boardShown) {
       // the opaque board layer repaints the maze area, so only clear the HUD strips
       c.fillRect(0, 0, WIDTH, TOP * T);
@@ -795,17 +882,61 @@ class Game {
     } else {
       c.fillRect(0, 0, WIDTH, HEIGHT);
     }
-    this.drawHUD();
-    if (this.state === 'title') {
-      this.drawTitle();
-    } else if (this.state === 'cutscene') {
-      this.cutscene.draw();
+    if (this.state === 'controls') {
+      this.controlsScreen.draw();
     } else {
-      this.drawMaze();
-      this.drawActors();
-      this.drawMessages();
+      this.drawHUD();
+      if (this.state === 'title') {
+        this.drawTitle();
+      } else if (this.state === 'cutscene') {
+        this.cutscene.draw();
+      } else {
+        this.drawMaze();
+        this.drawActors();
+        this.drawMessages();
+      }
+    }
+    if (this.iris) {
+      this.iris.draw(c);
+      this.drawLevelCard();
     }
     if (this.paused) this.drawPause();
+  }
+
+  // "LEVEL n" and its fruit, on the black while the iris is still small.
+  drawLevelCard() {
+    const card = this.card, c = this.ctx, mid = WIDTH / 2;
+    if (!card || this.iris.mode !== 'open') return;
+    const a = 1 - this.iris.openness * 1.8;
+    if (a <= 0) return;
+    c.globalAlpha = a;
+    this.text(`LEVEL ${card.level}`, mid, 12 * T, COLOR.pac, 16, 'center');
+    this.blitScaled(Sprites.fruit(card.kind), mid, 15.5 * T, 2);
+    this.text(MODE_NAMES[this.rules.mode], mid, 18.5 * T, COLOR.pink, 8, 'center');
+    c.globalAlpha = 1;
+  }
+
+  /* ---------- loading ---------- */
+
+  startLoading(steps) {
+    this.loader = new Loader(this, steps);
+    this.state = 'loading';
+  }
+
+  // Any key or button once everything is loaded skips the rest of the animation.
+  skipLoading() {
+    const l = this.loader;
+    if (l && l.ready && !l.closing) l.closing = new Iris('close', l.pacX(), Loader.LANE, 0.3);
+  }
+
+  finishLoading() {
+    const x = this.loader.pacX();
+    this.loader = null;
+    if (this.state !== 'loading') return;
+    this.state = 'title';
+    this.iris = new Iris('open', x, Loader.LANE, 0.6);
+    this.card = null;
+    if (Sound.hasTheme() && !Sound.themePlaying()) Sound.playTheme(true);
   }
 
   drawHUD() {
@@ -1085,8 +1216,9 @@ class Game {
     c.fillRect(0, 2 * T, WIDTH, HEIGHT - 4 * T);
     if (Math.floor(performance.now() / 400) % 2 === 0) this.text('PAUSED', mid, 14 * T, COLOR.pac, 16, 'center');
     if (TV_MODE) {
-      this.text('A / MENU  RESUME', mid, 17 * T, COLOR.text, 8, 'center');
-      this.text('B / BACK  QUIT TO MENU', mid, 18.5 * T, COLOR.text, 8, 'center');
+      const b = action => Controls.buttonsFor(0, action).map(x => Controls.BUTTON_NAMES[x])[0] || '-';
+      this.text(`${b('confirm')} / ${b('pause')}  RESUME`, mid, 17 * T, COLOR.text, 8, 'center');
+      this.text(`${b('back')} / BACK  QUIT TO MENU`, mid, 18.5 * T, COLOR.text, 8, 'center');
     } else {
       this.text('P  RESUME', mid, 17 * T, COLOR.text, 8, 'center');
       this.text('Q  QUIT TO MENU', mid, 18.5 * T, COLOR.text, 8, 'center');
@@ -1127,6 +1259,7 @@ class Game {
     if (top + ROWS_SHOWN < opts.length) this.drawArrow(26.3 * T, 27.6 * T, 1);
     // on the MODE row, explain the mode instead of the generic hint
     if (opts[this.menuIndex].key === 'mode') this.text(MODE_BLURBS[s.mode], mid, 28.5 * T, COLOR.pink, 8, 'center');
+    else if (opts[this.menuIndex] === CONTROLS_ROW) this.text(`${TV_MODE ? 'A' : 'ENTER'}: CONTROLLER TEST, BUTTONS AND KEYS`, mid, 28.5 * T, COLOR.pink, 8, 'center');
     else this.text('UP/DOWN SELECT   LEFT/RIGHT CHANGE', mid, 28.5 * T, COLOR.grey, 8, 'center');
 
     // who controls whom: keys on a computer, controllers on the TV (shown once joined)
@@ -1135,12 +1268,14 @@ class Game {
       ? (Pads.joined(slot) ? 'CONTROLLER' : (Math.floor(t * 2.5) % 2 ? 'PRESS A' : ''))
       : (Pads.joined(slot) ? padKeys : keys);
     this.text('PAC-MAN', 4 * T, 29.6 * T, COLOR.pac);
-    this.text(how(0, 'W A S D', 'WASD/PAD'), 16 * T, 29.6 * T, COLOR.pac);
+    this.text(how(0, keysLabel(0), keysLabel(0) + '/PAD'), 16 * T, 29.6 * T, COLOR.pac);
     this.text(p2Pac ? 'MS PAC-MAN' : 'GHOST', 4 * T, 30.9 * T, p2Col);
-    this.text(how(1, 'ARROWS', 'ARROWS/PAD'), 16 * T, 30.9 * T, p2Col);
-    const start = TV_MODE ? 'PRESS A TO START' : Pads.joined(0) || Pads.joined(1) ? 'PRESS ENTER / A' : 'PRESS ENTER TO START';
+    this.text(how(1, keysLabel(1), keysLabel(1) + '/PAD'), 16 * T, 30.9 * T, p2Col);
+    const start = TV_MODE ? `PRESS ${Controls.buttonsFor(0, 'confirm').map(x => Controls.BUTTON_NAMES[x])[0] || 'A'} TO START` : Pads.joined(0) || Pads.joined(1) ? 'PRESS ENTER / A' : 'PRESS ENTER TO START';
     if (Math.floor(t * 2.5) % 2 === 0) this.text(start, mid, 32.5 * T, COLOR.text, 16, 'center');
-    this.text(TV_MODE ? 'A START  B BACK  MENU PAUSE  Y SWAP P1/P2' : 'P PAUSE  M MUTE  F FULLSCREEN  T THEME', mid, 34.5 * T, COLOR.grey, 8, 'center');
+    const b = action => Controls.buttonsFor(0, action).map(x => Controls.BUTTON_NAMES[x])[0] || '-';
+    this.text(TV_MODE ? `${b('confirm')} START  ${b('controls')} CONTROLS  ${b('swap')} SWAP  ${b('pause')} PAUSE`
+      : 'P PAUSE  M MUTE  F FULL  T THEME  C CONTROLS', mid, 34.5 * T, COLOR.grey, 8, 'center');
   }
 
   // Small pixel triangle marking more options above (dir -1) or below (dir 1).
@@ -1219,6 +1354,15 @@ class Game {
    Boot
    ================================================================ */
 
+// How a player's keys read in hints: "W A S D", "ARROWS", "I J K L"...
+function keysLabel(slot) {
+  const codes = ['up', 'left', 'down', 'right'].map(d => Controls.keyFor(slot, d));
+  if (codes.every(c => c.startsWith('Arrow'))) return 'ARROWS';
+  const names = codes.map(Controls.keyName);
+  const label = names.join(' ');
+  return label.length <= 11 ? label : 'CUSTOM KEYS';
+}
+
 function toggleFullscreen() {
   try {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
@@ -1248,15 +1392,28 @@ function toggleFullscreen() {
     });
     // the TV remote's Back button (the app closes when this returns 'exit')
     Object.defineProperty(window, '__tvBack', { value: () => game.back(), writable: false, configurable: false });
+    // the app going to the background / coming back: pause the match, silence everything
+    Object.defineProperty(window, '__tvLife', {
+      value(state) {
+        if (state === 'pause') { game.pauseIfActive(); Sound.setBackground(true); }
+        else if (state === 'resume') Sound.setBackground(false);
+      },
+      writable: false,
+      configurable: false,
+    });
   }
 
-  // The control hint under the cabinet follows the chosen mode (text only, never markup).
+  // The control hints under the cabinet follow the mode and the key bindings (text only, never markup).
+  const helpP1 = help.querySelector('.pac');
   game.onModeChange = mode => {
     if (!helpP2 || TV_MODE) return;
-    helpP2.textContent = mode === 'versus' ? 'GHOST: ARROWS' : 'MS PAC-MAN: ARROWS';
+    helpP1.textContent = 'PAC-MAN: ' + keysLabel(0);
+    helpP2.textContent = (mode === 'versus' ? 'GHOST: ' : 'MS PAC-MAN: ') + keysLabel(1);
     helpP2.className = mode === 'versus' ? 'ghost' : 'ms';
   };
   game.onModeChange(game.settings.mode);
+  const close = game.closeControls.bind(game);
+  game.closeControls = () => { close(); game.onModeChange(game.settings.mode); };
 
   function layoutBulbs() {
     const w = bezel.clientWidth, h = bezel.clientHeight, inset = 7, gap = TV_MODE ? 30 : 20; // fewer bulbs on TV hardware
@@ -1305,43 +1462,72 @@ function toggleFullscreen() {
   document.addEventListener('fullscreenchange', fit);
   fit();
 
-  // Theme song: one the player loaded before (this browser only), else sounds/theme.mp3.
-  Theme.onChange = () => {
-    if (game.state === 'title' && !Sound.themePlaying()) Sound.playTheme(true);
-  };
-  Theme.restore();
-  // sounds/theme.mp3 only exists in local copies (it's git-ignored), so only look for it there
-  const localCopy = location.protocol === 'file:' || ['localhost', '127.0.0.1', 'appassets.androidplatform.net'].includes(location.hostname);
-  if (localCopy) Theme.bundled();
-
   window.addEventListener('keydown', e => {
     // leave browser and OS shortcuts alone
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     Sound.init();
     if (game.state === 'title' && Sound.hasTheme() && !Sound.themePlaying()) Sound.playTheme(true);
-    if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+    const bound = Controls.keyDir(e.code);
+    if (bound || e.code.startsWith('Arrow') || e.code === 'Space' || (game.state === 'controls' && game.controlsScreen.capture)) e.preventDefault();
     // On the TV, once a player has a controller the remote can't steer them mid-game
     // (menus still work), so one controller really is one player.
-    const slot = PAC_KEYS[e.code] ? 0 : GHOST_KEYS[e.code] ? 1 : -1;
-    if (TV_MODE && slot >= 0 && Pads.joined(slot) && game.state !== 'title' && !game.paused) return;
+    if (TV_MODE && bound && Pads.joined(bound.slot) && game.inPlay) return;
     game.onKey(e.code, e.repeat);
   });
   window.addEventListener('blur', () => game.pauseIfActive());
-  document.addEventListener('visibilitychange', () => { if (document.hidden) game.pauseIfActive(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) game.pauseIfActive();
+    Sound.setBackground(document.hidden);
+  });
 
-  let last = performance.now();
+  // The frame loop keeps going even if one frame throws, so a bug can't freeze the TV.
+  let last = performance.now(), errors = 0;
   function frame(now) {
+    requestAnimationFrame(frame);
     const dt = Math.max(0, Math.min((now - last) / 1000, 0.05));
     last = now;
-    Pads.poll();
-    game.update(dt);
-    game.render();
-    requestAnimationFrame(frame);
+    try {
+      Pads.poll();
+      game.update(dt);
+      game.render();
+    } catch (err) {
+      if (errors++ < 5) console.error(err);
+    }
   }
 
-  const fontReady = document.fonts ? document.fonts.load('16px "Press Start 2P"') : Promise.resolve();
-  Promise.race([fontReady, new Promise(r => setTimeout(r, 2000))]).finally(() => {
-    last = performance.now();
-    requestAnimationFrame(frame);
-  });
+  // Boot: real work, shown on the loading screen. Nothing here waits on the network.
+  const timeout = ms => new Promise(r => setTimeout(r, ms));
+  const DIRS4 = [RIGHT, LEFT, UP, DOWN];
+  game.startLoading([
+    { label: 'LOADING THE ARCADE FONT', run: () => {
+      const font = document.fonts ? document.fonts.load('16px "Press Start 2P"') : Promise.resolve();
+      return Promise.race([font, timeout(2500)]).finally(() => { game.fontReady = true; });
+    } },
+    { label: 'WAKING UP THE GHOSTS', run: () => {
+      for (const k of GHOST_ORDER) for (const f of [0, 1]) for (const d of DIRS4) Sprites.ghost(GHOSTS[k].color, f, d);
+      for (const f of [0, 1]) { Sprites.frightGhost(f, false); Sprites.frightGhost(f, true); }
+      for (const d of DIRS4) Sprites.ghostEyes(d);
+    } },
+    { label: 'TEACHING PAC-MAN TO CHOMP', run: () => {
+      for (const d of DIRS4) for (const m of MOUTHS) { const a = Math.atan2(d.y, d.x); Sprites.pac(a, m); Sprites.msPac(a, m); }
+    } },
+    { label: 'POLISHING THE FRUIT', run: () => {
+      Sprites.dot(); Sprites.pellet();
+      for (const k of FRUIT_ORDER) { Sprites.fruit(k); Sprites.fruitLocked(k); }
+      for (const k of TREAT_ORDER) Sprites.treat(k);
+    } },
+    { label: 'BUILDING THE MAZE', run: () => game.drawBoardLayer() },
+    { label: 'TUNING THE THEME SONG', run: () => {
+      // a song the player loaded before (this browser only), else sounds/theme.mp3
+      Theme.onChange = () => {
+        if (game.state === 'title' && !Sound.themePlaying()) Sound.playTheme(true);
+      };
+      // sounds/theme.mp3 only exists in local copies (it's git-ignored), so only look for it there
+      const localCopy = location.protocol === 'file:' || ['localhost', '127.0.0.1', 'appassets.androidplatform.net'].includes(location.hostname);
+      if (localCopy) Theme.bundled();
+      return Promise.race([Theme.restore(), timeout(3000)]);
+    } },
+    { label: 'LOOKING FOR CONTROLLERS', run: () => Pads.poll() },
+  ]);
+  requestAnimationFrame(frame);
 })();

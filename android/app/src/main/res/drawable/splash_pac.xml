@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Splash icon: Pac-Man chomping toward two dots. The jaws are two half discs
+     rotating about his centre. 288dp canvas, of which the middle 192dp circle shows. -->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+    <aapt:attr name="android:drawable">
+        <vector
+            android:width="288dp"
+            android:height="288dp"
+            android:viewportWidth="288"
+            android:viewportHeight="288">
+            <path
+                android:fillColor="#FFB8AE"
+                android:pathData="M188,144 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
+            <path
+                android:fillColor="#FFB8AE"
+                android:pathData="M218,144 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
+            <group
+                android:name="upper"
+                android:pivotX="122"
+                android:pivotY="144">
+                <path
+                    android:fillColor="#FFFF00"
+                    android:pathData="M70,144 A52,52 0 0,1 174,144 Z" />
+            </group>
+            <group
+                android:name="lower"
+                android:pivotX="122"
+                android:pivotY="144">
+                <path
+                    android:fillColor="#FFFF00"
+                    android:pathData="M70,144 A52,52 0 0,0 174,144 Z" />
+            </group>
+        </vector>
+    </aapt:attr>
+    <target android:name="upper">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:duration="125"
+                android:propertyName="rotation"
+                android:repeatCount="infinite"
+                android:repeatMode="reverse"
+                android:valueFrom="0"
+                android:valueTo="-38" />
+        </aapt:attr>
+    </target>
+    <target android:name="lower">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:duration="125"
+                android:propertyName="rotation"
+                android:repeatCount="infinite"
+                android:repeatMode="reverse"
+                android:valueFrom="0"
+                android:valueTo="38" />
+        </aapt:attr>
+    </target>
+</animated-vector>

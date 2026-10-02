@@ -7,6 +7,7 @@ const Sound = (() => {
   let master = null;
   let music = null;  // separate bus for jingles so they can be cut off
   let held = false;  // audio frozen by a pause
+  let away = false;  // app in the background
   let muted = false;
   let siren = null;
   let sirenKey = '';
@@ -30,7 +31,7 @@ const Sound = (() => {
 
   function init() {
     if (!context()) return;
-    if (ac.state === 'suspended' && !held) ac.resume();
+    if (ac.state === 'suspended' && !held && !away) ac.resume();
   }
 
   // One enveloped oscillator note, optionally sweeping to `to` Hz.
@@ -186,25 +187,22 @@ const Sound = (() => {
     music.disconnect();
     music = ac.createGain();
     music.connect(master);
-    return ac;
   }
 
-  function init() {
-    if (!context()) return;
-    if (ac.state === 'suspended' && !held) ac.resume();
-  }
-
-  // Freeze every sound in place while the game is paused.
-  function setPaused(paused) {
-    held = paused;
+  // Freeze every sound in place while the game is paused, or while the app is
+  // in the background (the TV app is backgrounded, the browser tab is hidden).
+  function apply() {
+    const stop = held || away;
     if (themeEl && themeElPlaying) {
-      if (paused) themeEl.pause();
+      if (stop) themeEl.pause();
       else themeEl.play().catch(() => {});
     }
     if (!ac) return;
-    if (paused && ac.state === 'running') ac.suspend();
-    else if (!paused && ac.state === 'suspended') ac.resume();
+    if (stop && ac.state === 'running') ac.suspend();
+    else if (!stop && ac.state === 'suspended') ac.resume();
   }
+  function setPaused(paused) { held = paused; apply(); }
+  function setBackground(hidden) { away = hidden; apply(); }
 
   function toggleMute() {
     muted = !muted;
@@ -280,7 +278,7 @@ const Sound = (() => {
   }
 
   return {
-    init, decode, stopMusic, setPaused, setThemeBuffer, setThemeElement, hasTheme, themePlaying, playTheme, fadeTheme, stopTheme,
+    init, decode, stopMusic, setPaused, setBackground, setThemeBuffer, setThemeElement, hasTheme, themePlaying, playTheme, fadeTheme, stopTheme,
     waka, eatGhost, fruit, extraLife, menu, death, intro, intermission, treatAppear, sugarRush, elroy,
     win, lose, setSiren, toggleMute,
     get muted() { return muted; },
