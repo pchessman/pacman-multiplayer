@@ -119,20 +119,19 @@ const fruitUnlockLevel = kind => FRUIT_BY_LEVEL.indexOf(kind) + 1;
 const modeTimesFor = level => MODE_TIMES[level === 1 ? 0 : level < 5 ? 1 : 2];
 const houseLimitsFor = level => HOUSE_DOT_LIMITS[Math.min(level, 3) - 1];
 
-// boost: player ghost vs Pac-Man (versus). aiSpeed: AI ghosts vs arcade speed.
-function computeSpeeds(level, boost, aiSpeed = 0) {
+// Arcade speed table (Pac-Man Dossier). Every ghost, the player's included,
+// runs at the arcade ghost speed; ghostSpeed is the optional adjustment on top.
+function computeSpeeds(level, ghostSpeed = 0) {
   const tier = (a, b, c, d = c) => (level === 1 ? a : level < 5 ? b : level < 21 ? c : d) * BASE_SPEED;
   const pac = tier(0.80, 0.90, 1.00, 0.90);
   const ghost = tier(0.75, 0.85, 0.95);
-  const player = pac * (1 + boost);
   return {
     pac,
     pacFright: tier(0.90, 0.95, 1.00),
     ai: ghost,
     fright: tier(0.50, 0.55, 0.60),
     tunnel: tier(0.40, 0.45, 0.50),
-    player,
-    aiMult: 1 + aiSpeed,
+    ghostMult: 1 + ghostSpeed,
     // Cruise Elroy multipliers relative to normal ghost speed (arcade: +5% / +10% of full speed)
     elroy1: (ghost + 0.05 * BASE_SPEED) / ghost,
     elroy2: (ghost + 0.10 * BASE_SPEED) / ghost,
@@ -166,8 +165,7 @@ const always = () => true;
 // Title-screen options. `show` hides the ones that don't apply to the chosen mode.
 const OPTIONS = [
   { key: 'mode',       label: 'MODE',         values: ['versus', 'coop'],           fmt: v => (v === 'coop' ? 'CO-OP' : 'VS GHOST'), show: always },
-  { key: 'boost',      label: 'GHOST SPEED',  values: [-0.3, -0.2, -0.1, 0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5], fmt: speedFmt, show: versus },
-  { key: 'aiSpeed',    label: 'GHOST SPEED',  values: [-0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4, 0.5], fmt: speedFmt, show: coop },
+  { key: 'ghostSpeed', label: 'GHOST SPEED',  values: [-0.3, -0.2, -0.1, 0, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5], fmt: speedFmt, show: always },
   { key: 'ai',         label: 'AI GHOSTS',    values: [0, 1, 2, 3],                 fmt: String, show: versus },
   { key: 'coopGhosts', label: 'GHOSTS',       values: [1, 2, 3, 4],                 fmt: String, show: coop },
   { key: 'extra',      label: 'EXTRA GHOST',  values: [false, true],                fmt: onOff, show: always },
@@ -178,11 +176,12 @@ const OPTIONS = [
   { key: 'treats',     label: 'BONUS TREATS', values: [true, false],                fmt: onOff, show: always },
 ];
 const DEFAULT_SETTINGS = {
-  mode: 'versus', boost: 0.15, aiSpeed: 0, ai: 0, coopGhosts: 4, extra: false,
+  mode: 'versus', ghostSpeed: 0, ai: 0, coopGhosts: 4, extra: false,
   lives: 3, livesMode: 'separate', scoreMode: 'separate', goal: 0, treats: true,
 };
-const SETTINGS_KEY = 'pacvs-settings-v3';
-const LEGACY_SETTINGS_KEY = 'pacvs-settings-v2';
+// v4: ghost speed became one arcade-relative setting; older speed values are dropped on load
+const SETTINGS_KEY = 'pacvs-settings-v4';
+const LEGACY_SETTINGS_KEY = 'pacvs-settings-v3';
 
 // Saved data is untrusted: keep only values the game actually offers.
 function sanitizeSettings(raw) {

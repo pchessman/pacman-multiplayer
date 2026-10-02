@@ -39,7 +39,7 @@ class Game {
     this.level = 1;
     this.lives = 0;
     this.stats = { ghosts: 0, fruit: 0, treats: 0, rushes: 0 };
-    this.speeds = computeSpeeds(1, this.settings.boost);
+    this.speeds = computeSpeeds(1, this.settings.ghostSpeed);
 
     // Turn logic for the human-driven Pac-Men (the player ghost has its own, with the no-up rule).
     this.playerCenter = a => {
@@ -143,7 +143,7 @@ class Game {
     this.maze.reset();
     this.drawBoardLayer();
     this.dotsEaten = 0;
-    this.speeds = computeSpeeds(this.level, this.rules.boost, this.coop ? this.rules.aiSpeed : 0);
+    this.speeds = computeSpeeds(this.level, this.rules.ghostSpeed);
     this.houseDots = { pinky: 0, inky: 0, clyde: 0 };
     this.globalCounter = null;
     this.elroySuspended = false;
@@ -499,16 +499,14 @@ class Game {
     }
   }
 
+  // Same arcade rules for every ghost, whoever is steering it: tunnel slowdown
+  // first, then fright, then normal speed (with Cruise Elroy for Blinky).
   ghostSpeed(g) {
-    // Arcade order: the tunnel slowdown wins over everything, then fright, then normal.
     const sp = this.speeds, inTunnel = Math.floor(g.y) === 14 && (g.x < 6 || g.x >= 22);
     const stage = g.kind === 'blinky' ? this.elroyStage() : 0;
     const elroy = stage === 2 ? sp.elroy2 : stage === 1 ? sp.elroy1 : 1;
-    if (!g.isPlayer) return (inTunnel ? sp.tunnel : g.frightened ? sp.fright : sp.ai * elroy) * sp.aiMult;
-    const rush = g.rush > 0 ? SUGAR_RUSH.mult : 1, edge = (1 + this.rules.boost) * rush;
-    if (inTunnel) return sp.tunnel * edge;
-    if (g.frightened) return sp.fright * edge;
-    return sp.player * rush * elroy;
+    const rush = g.rush > 0 ? SUGAR_RUSH.mult : 1;
+    return (inTunnel ? sp.tunnel : g.frightened ? sp.fright : sp.ai * elroy) * sp.ghostMult * rush;
   }
 
   // The Pac-Man an AI ghost is hunting: whichever is closest.
