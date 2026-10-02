@@ -147,6 +147,8 @@ const isCentered = v => v - 0.5 === Math.floor(v - 0.5);
 // Turn around on the spot. Mid-tile that's always safe (we came from behind);
 // exactly on a center the actor may have just turned, so check the way is open.
 function reverseIfOpen(a, maze, dir = OPP.get(a.dir)) {
+  // A ghost may never head up out of a no-up tile, not even by turning around inside it.
+  if (dir === UP && a.noUp && a.noUp(Math.floor(a.x), Math.floor(a.y))) return;
   const centered = isCentered(a.dir.x ? a.x : a.y);
   if (!centered || maze.walkable(Math.floor(a.x) + dir.x, Math.floor(a.y) + dir.y)) a.dir = dir;
 }
@@ -173,6 +175,7 @@ class Pacman {
     this.lives = 0;        // used when co-op lives are separate
     this.extraGiven = false;
     this.out = false;      // out of lives (co-op, separate lives)
+    this.chomps = 0;       // DUEL: times this player ate the rival
     this.reset();
   }
 
@@ -185,6 +188,9 @@ class Pacman {
     this.anim = 0;
     this.stall = 0;     // arcade: Pac-Man pauses briefly for every dot he eats
     this.corner = null; // pending diagonal catch-up while cornering
+    this.power = 0;     // DUEL: seconds left as SUPER (can eat the rival)
+    this.deadTimer = 0; // DUEL: seconds until respawn after a ghost catch
+    this.safe = 0;      // DUEL: seconds of post-respawn safety
   }
 
   update(dt, speed) {

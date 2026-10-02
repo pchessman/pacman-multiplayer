@@ -22,6 +22,7 @@ class Game {
 
     this.fruitNews = null;
     this.series = { pac: 0, ghost: 0 };
+    this.duelSeries = { pac: 0, ms: 0 };
     this.menuIndex = 0;
     this.time = 0;
     this.paused = false;
@@ -76,8 +77,11 @@ class Game {
 
   get pac() { return this.pacs[0]; }
   get coop() { return this.rules.mode === 'coop'; }
-  get sharedScore() { return !this.coop || this.rules.scoreMode === 'shared'; }
-  get sharedLives() { return !this.coop || this.rules.livesMode === 'shared'; }
+  get duel() { return this.rules.mode === 'duel'; }
+  get twoPac() { return this.rules.mode !== 'versus'; }
+  // VS GHOST keeps one score and one life count; co-op lets you choose; DUEL is always separate
+  get sharedScore() { return this.rules.mode === 'versus' || (this.coop && this.rules.scoreMode === 'shared'); }
+  get sharedLives() { return this.rules.mode === 'versus' || (this.coop && this.rules.livesMode === 'shared'); }
 
   // Render at `k` device pixels per canvas unit so the board stays sharp at any size.
   setScale(k) {
@@ -126,6 +130,7 @@ class Game {
     this.extraGiven = false;
     this.levelsCleared = 0;
     this.winner = null;
+    this.duelEnd = 0;
     this.stats = { ghosts: 0, fruit: 0, treats: 0, rushes: 0 };
     this.startLevel(true);
   }
@@ -173,7 +178,7 @@ class Game {
 
   buildGhosts() {
     const r = this.rules, list = [];
-    if (this.coop) {
+    if (this.twoPac) {
       for (const k of GHOST_ORDER.slice(0, r.coopGhosts)) list.push(new Ghost(this, k, false));
     } else {
       list.push(new Ghost(this, 'blinky', true));
@@ -181,7 +186,7 @@ class Game {
     }
     if (r.extra) list.push(new Ghost(this, 'funky', false));
     this.ghosts = list;
-    this.playerGhost = this.coop ? null : list[0];
+    this.playerGhost = this.twoPac ? null : list[0];
     this.blinky = list.find(g => g.kind === 'blinky') || null;
   }
 
@@ -189,9 +194,10 @@ class Game {
     this.state = 'over';
     this.winner = winner;
     this.overTimer = 0;
-    if (!this.coop && this.rules.goal) this.series[winner]++;
+    if (this.duel) { if (winner !== 'draw') this.duelSeries[winner]++; }
+    else if (!this.coop && this.rules.goal) this.series[winner]++;
     this.save();
-    if (winner === 'pac' || winner === 'team') Sound.win(); else Sound.lose();
+    if (winner === 'ghost' || winner === 'ghosts' || winner === 'draw') Sound.lose(); else Sound.win();
   }
 
   // Points go to the team (shared) or to the Pac-Man who earned them.
@@ -258,7 +264,9 @@ class Game {
         this.clearTimer += dt;
         if (this.clearTimer >= 3) {
           const act = INTERMISSIONS[this.level];
-          if (this.rules.goal && this.levelsCleared >= this.rules.goal) this.gameOver(this.coop ? 'team' : 'pac');
+          if (this.rules.goal && this.levelsCleared >= this.rules.goal) {
+            if (this.duel) this.finishDuel(); else this.gameOver(this.coop ? 'team' : 'pac');
+          }
           else if (act) { this.state = 'cutscene'; this.cutscene = new Intermission(this, act); }
           else this.nextLevel();
         }
@@ -322,6 +330,7 @@ class Game {
       if (this.fruit.life <= 0) this.fruit = null;
     }
     if (this.popups.length) this.updatePopups(dt);
+    if (this.duel) { this.updateDuel(dt); if (this.state !== 'play') return; }
     this.updateHouse(dt);
     this.updateElroy();
 
@@ -330,7 +339,7 @@ class Game {
     const pacSpeed = this.powerTime > 0 ? this.speeds.pacFright : this.speeds.pac;
     step: for (let i = 0; i < steps && this.state === 'play'; i++) {
       for (const p of this.pacs) {
-        if (p.out) continue;
+        if (p.out || p.deadTimer > 0) continue;
         p.update(h, pacSpeed);
         this.eat(p);
         if (this.state !== 'play') break step;
@@ -408,7 +417,7 @@ class Game {
       } else {
         this.addScore(50, pac);
         pac.stall += 3 / 60;
-        this.frighten();
+        this.frighten(pac);
       }
       if (this.dotsEaten === 70 || this.dotsEaten === 170) {
         const kind = fruitForLevel(this.level);
@@ -440,7 +449,7 @@ class Game {
     if (!t) return;
     if (t.gone) { this.treat = null; return; }
     for (const p of this.pacs) {
-      if (p.out || tileDist(p, t) >= 0.7) continue;
+      if (p.out || p.deadTimer > 0 || tileDist(p, t) >= 0.7) continue;
       this.addScore(t.pts, p);
       this.popup(t.x, t.y, String(t.pts), COLOR.pink, 2);
       this.stats.treats++;
@@ -458,21 +467,29 @@ class Game {
     }
   }
 
-  frighten() {
+  frighten(pac) {
     const time = byLevel(FRIGHT_TIME, this.level);
     this.chain = 0;
     for (const g of this.ghosts) if (!g.isPlayer && g.state === 'active') reverseIfOpen(g, this.maze);
     if (time <= 0) return; // from level 17 on, a pellet only turns the ghosts around
     this.powerTime = time;
     this.flashes = byLevel(FRIGHT_FLASHES, this.level);
+    if (this.duel && pac) {
+      pac.power = time;
+      this.popup(pac.x, pac.y - 1, 'SUPER!', COLOR.pac, 1);
+    }
     for (const g of this.ghosts) if (!g.isEyes && g.state !== 'waiting') g.frightened = true;
   }
 
   checkCollisions() {
     for (const p of this.pacs) {
-      if (p.out) continue;
+      if (p.out || p.deadTimer > 0) continue;
       for (const g of this.ghosts) {
         if (g.state !== 'active' || tileDist(p, g) >= HIT_RADIUS) continue;
+        if (this.duel && !g.frightened) {
+          if (p.safe <= 0) this.duelDeath(p);
+          continue;
+        }
         if (g.frightened) {
           const pts = 200 * 2 ** Math.min(this.chain, 3);
           this.chain++;
@@ -497,6 +514,59 @@ class Game {
         return;
       }
     }
+    if (this.duel) this.checkRivals();
+  }
+
+  /* ---------- DUEL ---------- */
+
+  updateDuel(dt) {
+    for (const p of this.pacs) {
+      if (p.out) continue;
+      if (p.power > 0) p.power = Math.max(0, p.power - dt);
+      if (p.safe > 0) p.safe = Math.max(0, p.safe - dt);
+      if (p.deadTimer > 0) {
+        p.deadTimer -= dt;
+        if (p.deadTimer <= 0) {
+          if (p.lives > 0) { p.reset(); p.safe = DUEL.safe; }
+          else p.out = true;
+        }
+      }
+    }
+    if (this.duelEnd > 0) {
+      this.duelEnd -= dt;
+      if (this.duelEnd <= 0) this.finishDuel();
+    }
+  }
+
+  // A ghost catch only costs that player a life; the rival keeps playing.
+  duelDeath(p) {
+    p.lives--;
+    p.deadTimer = DUEL.respawn;
+    p.power = 0;
+    p.stall = 0;
+    this.catches++;
+    Sound.death();
+    if (p.lives <= 0 && !this.duelEnd) this.duelEnd = DUEL.endDelay;
+  }
+
+  // While SUPER you can eat your rival: points for you, a trip home for them.
+  checkRivals() {
+    const [a, b] = this.pacs;
+    if (!a || !b || a.out || b.out || a.deadTimer > 0 || b.deadTimer > 0) return;
+    if ((a.power > 0) === (b.power > 0) || tileDist(a, b) >= HIT_RADIUS) return;
+    const [winner, loser] = a.power > 0 ? [a, b] : [b, a];
+    if (loser.safe > 0) return;
+    this.addScore(DUEL.chompPts, winner);
+    winner.chomps++;
+    this.popup(loser.x, loser.y, 'CHOMP! ' + DUEL.chompPts, winner.who === 'ms' ? COLOR.pink : COLOR.pac, 1.4);
+    Sound.eatGhost();
+    loser.reset();
+    loser.safe = DUEL.safe;
+  }
+
+  finishDuel() {
+    const [a, b] = this.pacs;
+    this.gameOver(a.score === b.score ? 'draw' : a.score > b.score ? 'pac' : 'ms');
   }
 
   // Same arcade rules for every ghost, whoever is steering it: tunnel slowdown
@@ -513,7 +583,7 @@ class Game {
   nearestPac(g) {
     let best = this.pacs[0], bd = Infinity;
     for (const p of this.pacs) {
-      if (p.out) continue;
+      if (p.out || p.deadTimer > 0) continue;
       const d = tileDist(p, g);
       if (d < bd) { bd = d; best = p; }
     }
@@ -565,7 +635,7 @@ class Game {
       case 'dying': return 'dead';
       case 'clear': return 'clear';
       case 'cutscene': return 'idle';
-      case 'over': return this.winner === 'pac' || this.winner === 'team' ? 'win-pac' : 'win-ghost';
+      case 'over': return ['pac', 'team', 'ms'].includes(this.winner) ? 'win-pac' : 'win-ghost';
       default: return 'play';
     }
   }
@@ -630,7 +700,7 @@ class Game {
     }
     if (PAC_KEYS[code]) this.pacs[0].want = PAC_KEYS[code];
     if (GHOST_KEYS[code]) {
-      const p2 = this.coop ? this.pacs[1] : this.playerGhost;
+      const p2 = this.twoPac ? this.pacs[1] : this.playerGhost;
       if (p2) p2.want = GHOST_KEYS[code];
     }
   }
@@ -718,7 +788,7 @@ class Game {
     const playing = this.state === 'play' || this.state === 'freeze';
     const blink = Math.floor(this.time * 3.5) % 2 === 0;
     const inMatch = this.state !== 'title';
-    const coop = inMatch && this.coop, separate = coop && !this.sharedScore;
+    const coop = inMatch && this.twoPac, separate = coop && !this.sharedScore;
 
     // left: Pac-Man (or the team), right: the ghost player, Ms. Pac-Man, or catches
     if (!playing || blink) this.text(coop && !separate ? 'TEAM' : 'PAC-MAN', T, 0, COLOR.pac);
@@ -756,7 +826,7 @@ class Game {
 
   drawLives() {
     const icon = MOUTHS[2], y = 35 * T, ty = 34.5 * T;
-    if (!this.coop) {
+    if (!this.twoPac) {
       const icons = Math.min(Math.max(this.lives - 1, 0), 5);
       for (let i = 0; i < icons; i++) this.blit(Sprites.pac(Math.PI, icon), (2 + 2 * i) * T, y);
     } else if (this.sharedLives) {
@@ -828,9 +898,12 @@ class Game {
         const [px, py] = this.pos(p);
         if (dyingLate && p === this.dyingPac) {
           this.drawDeath(p, px, py, (this.dieTimer - 1) / 1.3);
-        } else {
+        } else if (p.deadTimer > 0) {
+          this.drawDeath(p, px, py, (DUEL.respawn - p.deadTimer) / 1.3); // DUEL: dies in place
+        } else if (!(p.safe > 0 && Math.floor(this.time * 10) % 2)) {     // blink while respawn-safe
           const mouth = s === 'ready' || s === 'clear' ? 0 : p.mouth;
-          this.blit(this.pacSprite(p, mouth), px, py);
+          if (p.power > 0) this.blitScaled(this.pacSprite(p, mouth), px, py, DUEL.superScale);
+          else this.blit(this.pacSprite(p, mouth), px, py);
         }
       }
     }
@@ -896,6 +969,7 @@ class Game {
     c.strokeRect(x + 3, y + 3, w - 6, h - 6);
     c.strokeRect(x + 9, y + 9, w - 18, h - 18);
 
+    if (this.duel) { this.drawDuelResults(x, y, w, mid); return; }
     const coop = this.coop, endless = !this.rules.goal;
     const won = this.winner === 'pac' || this.winner === 'team';
     const flash = Math.floor(this.time * 4) % 2 === 0;
@@ -951,6 +1025,36 @@ class Game {
     this.text('ESC  MENU', mid, y + 22.3 * T, COLOR.grey, 8, 'center');
   }
 
+  drawDuelResults(x, y, w, mid) {
+    const [a, b] = this.pacs, win = this.winner;
+    const flash = Math.floor(this.time * 4) % 2 === 0;
+    const mouth = MOUTHS[Math.floor(this.time * 15) % 4];
+    const headline = win === 'draw' ? "IT'S A DRAW!" : win === 'ms' ? 'MS PAC-MAN WINS!' : 'PAC-MAN WINS!';
+    this.text(headline, mid, y + 2 * T, flash ? (win === 'ms' ? COLOR.pink : COLOR.pac) : '#FFFFFF', 16, 'center');
+    if (win === 'pac') this.blitScaled(Sprites.pac(0, mouth), mid, y + 4.5 * T, 1.6);
+    else if (win === 'ms') this.blitScaled(Sprites.msPac(Math.PI, mouth), mid, y + 4.5 * T, 1.6);
+    else { this.blit(Sprites.pac(0, mouth), mid - T, y + 4.5 * T); this.blit(Sprites.msPac(Math.PI, mouth), mid + T, y + 4.5 * T); }
+    const goal = this.rules.goal;
+    const rows = [
+      ['PAC-MAN', a.score, COLOR.pac],
+      ['MS PAC-MAN', b.score, COLOR.pink],
+      ['PAC CHOMPS', a.chomps, COLOR.pac],
+      ['MS CHOMPS', b.chomps, COLOR.pink],
+      goal ? ['LEVELS', this.levelsCleared + '/' + goal, COLOR.text] : ['LEVEL', this.level, COLOR.text],
+      ['GHOSTS EATEN', this.stats.ghosts, COLOR.cyan],
+      ['TIMES CAUGHT', this.catches, COLOR.red],
+    ];
+    rows.forEach(([label, v, col], i) => {
+      const ry = y + (6.5 + i * 1.4) * T;
+      this.text(label, x + 2.5 * T, ry, col);
+      this.text(String(v), x + w - 2.5 * T, ry, COLOR.text, 16, 'right');
+    });
+    this.text('SERIES', mid, y + 17 * T, COLOR.grey, 8, 'center');
+    this.text(`PAC ${this.duelSeries.pac}  -  ${this.duelSeries.ms} MS PAC`, mid, y + 18 * T, COLOR.text, 16, 'center');
+    if (this.overTimer > 1.5 && flash) this.text('ENTER  REMATCH', mid, y + 20.5 * T, COLOR.pac, 16, 'center');
+    this.text('ESC  MENU', mid, y + 22.3 * T, COLOR.grey, 8, 'center');
+  }
+
   drawPause() {
     const c = this.ctx, mid = WIDTH / 2;
     c.fillStyle = 'rgba(0,0,0,0.7)';
@@ -973,7 +1077,8 @@ class Game {
     c.fillStyle = COLOR.pac;
     c.fillText('PAC-MAN', mid, 3 * T);
     const cycle = [COLOR.red, COLOR.pink, COLOR.cyan, COLOR.orange][Math.floor(t * 2) % 4];
-    this.text(s.mode === 'coop' ? '- CO-OP EDITION -' : '- VERSUS EDITION -', mid, 6 * T, cycle, 16, 'center');
+    const editions = { versus: '- VERSUS EDITION -', coop: '- CO-OP EDITION -', duel: '- DUEL EDITION -' };
+    this.text(editions[s.mode], mid, 6 * T, cycle, 16, 'center');
 
     if (Math.floor(t / 9) % 2 === 0) this.drawTitleCharacters(t);
     else this.drawTitleBonus(t);
@@ -991,13 +1096,16 @@ class Game {
     c.fillStyle = COLOR.grey;
     if (top > 0) this.drawArrow(26.3 * T, 22.4 * T, -1);
     if (top + ROWS_SHOWN < opts.length) this.drawArrow(26.3 * T, 27.6 * T, 1);
-    this.text('UP/DOWN SELECT   LEFT/RIGHT CHANGE', mid, 28.5 * T, COLOR.grey, 8, 'center');
+    // on the MODE row, explain the mode instead of the generic hint
+    if (opts[this.menuIndex].key === 'mode') this.text(MODE_BLURBS[s.mode], mid, 28.5 * T, COLOR.pink, 8, 'center');
+    else this.text('UP/DOWN SELECT   LEFT/RIGHT CHANGE', mid, 28.5 * T, COLOR.grey, 8, 'center');
 
     this.text('PAC-MAN', 4 * T, 29.6 * T, COLOR.pac);
     this.text('W A S D', 16 * T, 29.6 * T, COLOR.pac);
-    if (s.mode === 'coop') this.text('MS PAC-MAN', 4 * T, 30.9 * T, COLOR.pink);
+    const p2Pac = s.mode !== 'versus';
+    if (p2Pac) this.text('MS PAC-MAN', 4 * T, 30.9 * T, COLOR.pink);
     else this.text('GHOST', 4 * T, 30.9 * T, COLOR.red);
-    this.text('ARROWS', 16 * T, 30.9 * T, s.mode === 'coop' ? COLOR.pink : COLOR.red);
+    this.text('ARROWS', 16 * T, 30.9 * T, p2Pac ? COLOR.pink : COLOR.red);
     if (Math.floor(t * 2.5) % 2 === 0) this.text('PRESS ENTER TO START', mid, 32.5 * T, COLOR.text, 16, 'center');
     this.text('P PAUSE  M MUTE  F FULLSCREEN  T THEME', mid, 34.5 * T, COLOR.grey, 8, 'center');
   }
@@ -1100,8 +1208,8 @@ function toggleFullscreen() {
   // The control hint under the cabinet follows the chosen mode (text only, never markup).
   game.onModeChange = mode => {
     if (!helpP2) return;
-    helpP2.textContent = mode === 'coop' ? 'MS PAC-MAN: ARROWS' : 'GHOST: ARROWS';
-    helpP2.className = mode === 'coop' ? 'ms' : 'ghost';
+    helpP2.textContent = mode === 'versus' ? 'GHOST: ARROWS' : 'MS PAC-MAN: ARROWS';
+    helpP2.className = mode === 'versus' ? 'ghost' : 'ms';
   };
   game.onModeChange(game.settings.mode);
 

@@ -74,6 +74,7 @@ const GHOST_ORDER = ['blinky', 'pinky', 'inky', 'clyde'];
 const PAC_STARTS = {
   versus: [{ who: 'pac', x: 14, y: 23.5, dir: LEFT }],
   coop: [{ who: 'pac', x: 13, y: 23.5, dir: LEFT }, { who: 'ms', x: 15, y: 23.5, dir: RIGHT }],
+  duel: [{ who: 'pac', x: 13, y: 23.5, dir: LEFT }, { who: 'ms', x: 15, y: 23.5, dir: RIGHT }],
 };
 
 /* ---------- arcade level tables (index = level - 1, last entry repeats) ---------- */
@@ -160,14 +161,23 @@ const speedFmt = v => (v === 0 ? 'NORMAL' : (v > 0 ? '+' : '-') + Math.round(Mat
 const onOff = v => (v ? 'ON' : 'OFF');
 const versus = s => s.mode === 'versus';
 const coop = s => s.mode === 'coop';
+const twoPac = s => s.mode !== 'versus';
+const MODE_NAMES = { versus: 'VS GHOST', coop: 'CO-OP', duel: 'DUEL' };
+const MODE_BLURBS = {
+  versus: 'P1 PAC-MAN  VS  P2 GHOST',
+  coop: 'PAC-MAN + MS PAC-MAN VS THE GHOSTS',
+  duel: 'RACE FOR POINTS - POWER UP TO EAT YOUR RIVAL',
+};
+// DUEL: eating your rival while powered up
+const DUEL = { chompPts: 1000, respawn: 2.8, safe: 2, endDelay: 1.6, superScale: 1.25 };
 const always = () => true;
 
 // Title-screen options. `show` hides the ones that don't apply to the chosen mode.
 const OPTIONS = [
-  { key: 'mode',       label: 'MODE',         values: ['versus', 'coop'],           fmt: v => (v === 'coop' ? 'CO-OP' : 'VS GHOST'), show: always },
+  { key: 'mode',       label: 'MODE',         values: ['versus', 'coop', 'duel'],   fmt: v => MODE_NAMES[v], show: always },
   { key: 'ghostSpeed', label: 'GHOST SPEED',  values: [-0.3, -0.2, -0.1, 0, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5], fmt: speedFmt, show: always },
   { key: 'ai',         label: 'AI GHOSTS',    values: [0, 1, 2, 3],                 fmt: String, show: versus },
-  { key: 'coopGhosts', label: 'GHOSTS',       values: [1, 2, 3, 4],                 fmt: String, show: coop },
+  { key: 'coopGhosts', label: 'GHOSTS',       values: [1, 2, 3, 4],                 fmt: String, show: twoPac },
   { key: 'extra',      label: 'EXTRA GHOST',  values: [false, true],                fmt: onOff, show: always },
   { key: 'lives',      label: 'LIVES',        values: [1, 2, 3, 4, 5],              fmt: String, show: always },
   { key: 'livesMode',  label: 'LIVES POOL',   values: ['separate', 'shared'],       fmt: v => v.toUpperCase(), show: coop },
@@ -220,4 +230,4 @@ function deepFreeze(o) {
 }
 [LAYOUT, GHOSTS, GHOST_ORDER, PAC_STARTS, FRUITS, FRUIT_ORDER, FRUIT_BY_LEVEL, FRIGHT_TIME, FRIGHT_FLASHES, ELROY_DOTS,
   MODE_TIMES, HOUSE_DOT_LIMITS, HOUSE_GLOBAL_LIMITS, INTERMISSIONS, TREATS, TREAT_ORDER, TREAT_DOTS, SUGAR_RUSH,
-  OPTIONS, DEFAULT_SETTINGS, MOUTHS, COLOR, PAC_KEYS, GHOST_KEYS, DOOR, FRUIT_SPOT, DIR_ORDER].forEach(deepFreeze);
+  OPTIONS, DEFAULT_SETTINGS, MOUTHS, MODE_NAMES, MODE_BLURBS, DUEL, COLOR, PAC_KEYS, GHOST_KEYS, DOOR, FRUIT_SPOT, DIR_ORDER].forEach(deepFreeze);

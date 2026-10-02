@@ -1,6 +1,6 @@
 # Pac-Man Versus
 
-A two-player, one-keyboard take on the 1980 arcade classic. In **VS Ghost** mode one player is Pac-Man and the other plays Blinky the ghost. In **Co-op** mode both players are Pac-Men (Pac-Man and Ms. Pac-Man) working together against the AI ghosts. Everything is drawn in 8-bit pixel art on the original 28×31 maze, with flashing power pellets, blue frightened ghosts, a flashing maze when a level is cleared, and chase lights around the cabinet bezel.
+A two-player, one-keyboard take on the 1980 arcade classic. In **VS Ghost** mode one player is Pac-Man and the other plays Blinky the ghost. In **Co-op** mode both players are Pac-Men (Pac-Man and Ms. Pac-Man) working together against the AI ghosts. In **Duel** mode they race each other. Everything is drawn in 8-bit pixel art on the original 28×31 maze, with flashing power pellets, blue frightened ghosts, a flashing maze when a level is cleared, and chase lights around the cabinet bezel.
 
 ## Play
 
@@ -27,7 +27,7 @@ Turns are buffered, so you can press a direction early and the character takes i
 These follow the 1980 original:
 
 - **The maze is the arcade's, tile for tile.** It has 240 dots and 4 power pellets, plus the side tunnels and the ghost house.
-- **No-up zones.** Ghosts can't turn upward on the four tiles just above and below the ghost house, unless they're frightened. That rule applies to the player ghost too, so Pac-Man can use those corridors to shake a pursuer.
+- **No-up zones.** Ghosts can't head upward out of the four tiles under the T-shaped walls, two above the ghost house and two beside Pac-Man's start, unless they're frightened. That includes turning around inside one of those tiles, so there's no way to sneak up. That rule applies to the player ghost too, so Pac-Man can use those corridors to shake a pursuer.
 - **Cruise Elroy.** When few dots are left, the red ghost speeds up in two stages. The HUD shows `ELROY` and the siren speeds up.
 - **Cornering.** Pac-Man can turn a few pixels early or late and cut the corner diagonally. Ghosts can't.
 - **Eating slows you down.** Pac-Man pauses for a frame on every dot and three frames on a power pellet.
@@ -62,6 +62,14 @@ Pac-Man (WASD) and Ms. Pac-Man (arrows) start on either side of the arcade start
   - *Separate:* each player keeps their own score, shown left and right at the top.
   - *Shared:* both players add to one team score. The 10,000-point extra life follows the same rule, so each player earns their own or the team earns one.
 
+## Duel mode
+
+Pac-Man (WASD) and Ms. Pac-Man (arrows) race each other for points through the same maze while the AI ghosts hunt them both.
+
+- **Go SUPER.** Eat a power pellet and you grow bigger for the fright time. Ghosts turn blue for both players, but only you can **chomp your rival**: +1000 points for you, and a trip back to the start for them. They don't lose a life.
+- **Ghosts don't stop the match.** If a ghost catches you, only you lose a life. You die where you were caught while your rival keeps eating, then you respawn at your start, blinking and safe from ghosts and from being chomped for 2 seconds.
+- **Who wins.** The match ends when either player runs out of lives, or when the level goal is reached. **Most points wins**, and equal points is a draw. A Pac vs Ms. Pac series score carries across rematches.
+
 ## Extra ghost
 
 Turning on **Extra Ghost** adds a fifth, green ghost (not in the arcade). It slips in through a side tunnel 8 seconds into each round. From far away it heads straight for Pac-Man, and up close it aims a few tiles *behind* him to cut off his escape. It works in both modes.
@@ -77,9 +85,9 @@ The game can play a theme song you supply, on the title screen and through the o
 
 | Option | Values |
 | --- | --- |
-| Mode | VS Ghost or Co-op |
+| Mode | VS Ghost, Co-op or Duel. With the cursor on Mode, the hint line explains the selected mode |
 | Ghost Speed | All ghosts, from −30% to +50% of arcade speed. The default, NORMAL, is the real arcade speed table |
-| AI Ghosts (VS) / Ghosts (co-op) | VS: 0–3 extra AI ghosts. Co-op: 1–4 AI ghosts (default all four) |
+| AI Ghosts (VS) / Ghosts (co-op, duel) | VS: 0–3 extra AI ghosts. Co-op and Duel: 1–4 AI ghosts (default all four) |
 | Extra Ghost | Adds the fifth, green ghost |
 | Lives Pool, Points (co-op) | Separate or shared |
 | Lives | 1–5 |
