@@ -1320,6 +1320,10 @@ function toggleFullscreen() {
     Sound.init();
     if (game.state === 'title' && Sound.hasTheme() && !Sound.themePlaying()) Sound.playTheme(true);
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+    // On the TV, once a player has a controller the remote can't steer them mid-game
+    // (menus still work), so one controller really is one player.
+    const slot = PAC_KEYS[e.code] ? 0 : GHOST_KEYS[e.code] ? 1 : -1;
+    if (TV_MODE && slot >= 0 && Pads.joined(slot) && game.state !== 'title' && !game.paused) return;
     game.onKey(e.code, e.repeat);
   });
   window.addEventListener('blur', () => game.pauseIfActive());
