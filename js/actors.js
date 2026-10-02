@@ -30,6 +30,7 @@ class Maze {
     if (ch !== '.' && ch !== 'o') return null;
     this.grid[r][wrapCol(c)] = ' ';
     this.left--;
+    if (this.onTake) this.onTake(wrapCol(c), r, ch);
     return ch;
   }
 }
@@ -52,13 +53,14 @@ function distanceMap(maze, sources) {
 }
 
 // Pre-render the arcade-style outlined walls (rounded corners, double lines on
-// thin walls) at `scale` device pixels per canvas unit.
-function renderWalls(color, scale) {
+// thin walls). They're drawn at canvas resolution and the anti-aliasing is
+// snapped to hard pixels, so the curves step like the arcade's tile graphics
+// when the board is scaled up.
+function renderWalls(color) {
   const c = document.createElement('canvas');
-  c.width = Math.round(COLS * T * scale);
-  c.height = Math.round(MAZE_ROWS * T * scale);
+  c.width = COLS * T;
+  c.height = MAZE_ROWS * T;
   const g = c.getContext('2d');
-  g.scale(scale, scale);
   const wall = (x, y) => x >= 0 && x < COLS && y >= 0 && y < MAZE_ROWS && LAYOUT[y][x] === '#';
   const D = 5; // line inset from the tile edge facing a corridor
   g.strokeStyle = color;
@@ -96,6 +98,10 @@ function renderWalls(color, scale) {
   // ghost-house door
   g.fillStyle = COLOR.door;
   for (let x = 0; x < COLS; x++) if (LAYOUT[12][x] === '-') g.fillRect(x * T, 12 * T + 6, T, 4);
+
+  const img = g.getImageData(0, 0, c.width, c.height), px = img.data;
+  for (let i = 3; i < px.length; i += 4) px[i] = px[i] >= 100 ? 255 : 0;
+  g.putImageData(img, 0, 0);
   return c;
 }
 

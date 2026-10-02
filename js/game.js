@@ -5,7 +5,7 @@
 class Game {
   constructor(canvas) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
+    this.ctx = canvas.getContext('2d', { alpha: false });
     this.k = 0;
     this.maze = new Maze();
     this.eyesMap = distanceMap(this.maze, [[13, 11]]);
@@ -39,6 +39,24 @@ class Game {
       }
     };
 
+    this.wallsBlue = renderWalls(COLOR.wall);
+    this.wallsWhite = renderWalls('#FFFFFF');
+
+    // The board (walls + dots) is baked into one layer at device resolution, so
+    // each frame is a single straight copy. Eaten dots are erased from it one
+    // at a time instead of redrawing ~240 dot sprites every frame.
+    this.boardLayer = document.createElement('canvas');
+    this.flashLayer = document.createElement('canvas');
+    this.pellets = [];
+    LAYOUT.forEach((row, r) => [...row].forEach((ch, c) => { if (ch === 'o') this.pellets.push([c, r]); }));
+    this.maze.onTake = (c, r, ch) => {
+      if (ch !== '.') return;
+      const k = this.k;
+      const g = this.boardLayer.getContext('2d');
+      g.fillStyle = '#000';
+      g.fillRect((c * T + T / 2 - 2) * k, (r * T + T / 2 - 2) * k, 4 * k, 4 * k);
+    };
+
     this.setScale(1);
     this.state = 'title';
   }
@@ -49,8 +67,30 @@ class Game {
     this.k = k;
     this.canvas.width = WIDTH * k;
     this.canvas.height = HEIGHT * k;
-    this.wallsBlue = renderWalls(COLOR.wall, k);
-    this.wallsWhite = renderWalls('#FFFFFF', k);
+    for (const layer of [this.boardLayer, this.flashLayer]) {
+      layer.width = COLS * T * k;
+      layer.height = MAZE_ROWS * T * k;
+    }
+    const f = this.flashLayer.getContext('2d', { alpha: false });
+    f.imageSmoothingEnabled = false;
+    f.fillStyle = '#000';
+    f.fillRect(0, 0, f.canvas.width, f.canvas.height);
+    f.drawImage(this.wallsWhite, 0, 0, f.canvas.width, f.canvas.height);
+    this.drawBoardLayer();
+  }
+
+  // Walls plus every dot still on the board, upscaled with hard pixel edges.
+  drawBoardLayer() {
+    const g = this.boardLayer.getContext('2d', { alpha: false }), k = this.k, dot = Sprites.dot();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, g.canvas.width, g.canvas.height);
+    g.imageSmoothingEnabled = false;
+    g.drawImage(this.wallsBlue, 0, 0, g.canvas.width, g.canvas.height);
+    g.setTransform(k, 0, 0, k, 0, 0);
+    this.maze.grid.forEach((row, r) => row.forEach((ch, c) => {
+      if (ch === '.') g.drawImage(dot, c * T + T / 2 - 2, r * T + T / 2 - 2);
+    }));
   }
 
   /* ---------- flow ---------- */
@@ -78,6 +118,7 @@ class Game {
       store.set('pacvs-best-level', this.bestLevel);
     }
     this.maze.reset();
+    this.drawBoardLayer();
     this.dotsEaten = 0;
     this.speeds = computeSpeeds(this.level, this.settings.boost);
     this.houseDots = { pinky: 0, inky: 0, clyde: 0 };
@@ -187,6 +228,7 @@ class Game {
   }
 
   nextLevel() {
+    Sound.stopMusic();
     this.cutscene = null;
     this.level++;
     this.startLevel(false);
@@ -381,15 +423,14 @@ class Game {
   }
 
   ghostSpeed(g) {
-    const rush = g.rush > 0 ? SUGAR_RUSH.mult : 1;
-    if (g.frightened) return this.speeds.fright * rush;
-    const inTunnel = Math.floor(g.y) === 14 && (g.x < 6 || g.x >= 22);
-    if (!g.isPlayer) return inTunnel ? this.speeds.tunnel : this.speeds.ai;
+    // Arcade order: the tunnel slowdown wins over everything, then fright, then normal.
+    const sp = this.speeds, inTunnel = Math.floor(g.y) === 14 && (g.x < 6 || g.x >= 22);
+    if (!g.isPlayer) return inTunnel ? sp.tunnel : g.frightened ? sp.fright : sp.ai;
+    const edge = (1 + this.settings.boost) * (g.rush > 0 ? SUGAR_RUSH.mult : 1);
+    if (inTunnel) return sp.tunnel * edge;
+    if (g.frightened) return sp.fright * edge;
     const stage = this.elroyStage();
-    let v = this.speeds.player * rush;
-    if (stage === 1) v *= this.speeds.elroy1;
-    else if (stage === 2) v *= this.speeds.elroy2;
-    return inTunnel ? v * 0.6 : v;
+    return sp.player * (g.rush > 0 ? SUGAR_RUSH.mult : 1) * (stage === 2 ? sp.elroy2 : stage === 1 ? sp.elroy1 : 1);
   }
 
   // Classic arcade targeting for the AI-controlled ghosts, including the
@@ -480,7 +521,7 @@ class Game {
 
     if ((code === 'KeyP' || code === 'Escape') && !repeat) {
       this.paused = !this.paused;
-      if (this.paused) Sound.setSiren('off');
+      Sound.setPaused(this.paused);
       return;
     }
     if (this.paused) {
@@ -493,6 +534,8 @@ class Game {
 
   toTitle() {
     this.paused = false;
+    Sound.setPaused(false);
+    Sound.stopMusic();
     this.state = 'title';
     this.cutscene = null;
     store.set('pacvs-hiscore', this.hiscore);
@@ -502,8 +545,14 @@ class Game {
   pauseIfActive() {
     if (!['title', 'over', 'cutscene'].includes(this.state) && !this.paused) {
       this.paused = true;
-      Sound.setSiren('off');
+      Sound.setPaused(true);
     }
+    this.save();
+  }
+
+  save() {
+    store.set('pacvs-hiscore', this.hiscore);
+    store.set('pacvs-best-level', this.bestLevel);
   }
 
   /* ---------- rendering ---------- */
@@ -534,7 +583,14 @@ class Game {
     c.setTransform(this.k, 0, 0, this.k, 0, 0);
     c.imageSmoothingEnabled = false;
     c.fillStyle = '#000';
-    c.fillRect(0, 0, WIDTH, HEIGHT);
+    const boardShown = this.state !== 'title' && this.state !== 'cutscene';
+    if (boardShown) {
+      // the opaque board layer repaints the maze area, so only clear the HUD strips
+      c.fillRect(0, 0, WIDTH, TOP * T);
+      c.fillRect(0, (TOP + MAZE_ROWS) * T, WIDTH, HEIGHT - (TOP + MAZE_ROWS) * T);
+    } else {
+      c.fillRect(0, 0, WIDTH, HEIGHT);
+    }
     this.drawHUD();
     if (this.state === 'title') {
       this.drawTitle();
@@ -581,21 +637,15 @@ class Game {
 
   drawMaze() {
     const c = this.ctx;
-    let walls = this.wallsBlue;
-    if (this.state === 'clear' && this.clearTimer > 1 && this.clearTimer < 2.6) {
-      if (Math.floor((this.clearTimer - 1) / 0.2) % 2 === 0) walls = this.wallsWhite;
-    }
-    c.drawImage(walls, 0, TOP * T, COLS * T, MAZE_ROWS * T);
+    const flashing = this.state === 'clear' && this.clearTimer > 1 && this.clearTimer < 2.6 &&
+      Math.floor((this.clearTimer - 1) / 0.2) % 2 === 0;
+    c.drawImage(flashing ? this.flashLayer : this.boardLayer, 0, TOP * T, COLS * T, MAZE_ROWS * T);
     if (this.state === 'clear' || this.state === 'over') return;
 
-    const blinkOn = this.state !== 'play' || Math.floor(this.time * 6) % 2 === 0;
-    const dot = Sprites.dot(), pellet = Sprites.pellet();
-    const grid = this.maze.grid;
-    for (let r = 0; r < MAZE_ROWS; r++) {
-      for (let col = 0; col < COLS; col++) {
-        const ch = grid[r][col];
-        if (ch === '.') this.blit(dot, col * T + T / 2, (r + TOP) * T + T / 2);
-        else if (ch === 'o' && blinkOn) this.blit(pellet, col * T + T / 2, (r + TOP) * T + T / 2);
+    if (this.state !== 'play' || Math.floor(this.time * 6) % 2 === 0) {
+      const pellet = Sprites.pellet();
+      for (const [col, r] of this.pellets) {
+        if (this.maze.grid[r][col] === 'o') this.blit(pellet, col * T + T / 2, (r + TOP) * T + T / 2);
       }
     }
     if (this.fruit) this.blit(Sprites.fruit(this.fruit.kind), ...this.pos(this.fruit));

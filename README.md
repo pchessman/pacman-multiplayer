@@ -47,7 +47,8 @@ These follow the 1980 original:
 
 - **Bonus treats.** These aren't in the arcade original. An ice cream, cupcake, donut or lollipop wanders in through a tunnel after 120 and 200 dots and roams the maze. Pac-Man eats it for 800–2000 points. If the ghost grabs it first, the ghost gets a 4-second **sugar rush** speed boost and the bezel lights turn pink.
 - **Match stats and series score** appear on the game-over screen, and a running Pac-Man vs Ghost tally carries across rematches.
-- **The board fills the window** and stays sharp at any size. Press F for fullscreen.
+- **The board fills the window** and stays sharp at any size. Press F for fullscreen. The maze walls are drawn at arcade scale with hard pixel edges, so the curves step slightly like the original's tile graphics.
+- **Light on the CPU.** The walls and dots are baked into one layer that's copied once per frame, eaten dots are erased individually, and the bezel lights animate on the GPU. Pausing also freezes all sound, music included.
 
 ## Options (title screen)
 

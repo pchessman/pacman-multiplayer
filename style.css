@@ -96,41 +96,59 @@ canvas {
   margin: -3.5px 0 0 -3.5px;
   border-radius: 50%;
   background: var(--bulb-off);
+}
+
+/* The lit glow lives on its own layer and only its opacity animates, so the
+   chase runs on the compositor instead of repainting every bulb. */
+.bulb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--lit);
+  box-shadow: 0 0 8px 3px var(--lit);
+  opacity: 0;
   animation: chase 0.9s steps(1, end) infinite;
 }
-.bulb.p1 { animation-delay: -0.3s; }
-.bulb.p2 { animation-delay: -0.6s; }
+.bulb.p1::after { animation-delay: -0.3s; }
+.bulb.p2::after { animation-delay: -0.6s; }
 
 @keyframes chase {
-  0%     { background: var(--lit); box-shadow: 0 0 8px 3px var(--lit); }
-  33.33% { background: var(--bulb-off); box-shadow: none; }
+  0%     { opacity: 1; }
+  33.33% { opacity: 0; }
 }
 
-body[data-lights="idle"] .bulb { --lit: var(--c); animation-duration: 1.2s; }
+@keyframes blink {
+  0%  { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+body[data-lights="idle"] .bulb { --lit: var(--c); }
+body[data-lights="idle"] .bulb::after { animation-duration: 1.2s; }
 
 body[data-lights="fright"] { --bulb: #4a5bff; --frame: #4a5bff; }
-body[data-lights="fright"] .bulb { animation-duration: 0.45s; }
+body[data-lights="fright"] .bulb::after { animation-duration: 0.45s; }
 
 body[data-lights="rush"] { --bulb: #ff6fb8; --frame: #ff6fb8; }
-body[data-lights="rush"] .bulb { animation-duration: 0.3s; }
+body[data-lights="rush"] .bulb::after { animation-duration: 0.3s; }
 
 body[data-lights="dead"] { --bulb: #ff2a2a; --frame: #ff2a2a; }
-body[data-lights="dead"] .bulb { animation: blink 0.25s steps(1, end) infinite; }
+body[data-lights="dead"] .bulb::after { animation: blink 0.25s steps(1, end) infinite; }
 
 body[data-lights="clear"] { --bulb: #ffffff; --frame: #ffffff; }
-body[data-lights="clear"] .bulb { animation: blink 0.2s steps(1, end) infinite; }
+body[data-lights="clear"] .bulb::after { animation: blink 0.2s steps(1, end) infinite; }
 
 body[data-lights="win-pac"] { --bulb: #ffff00; --frame: #ffff00; }
-body[data-lights="win-pac"] .bulb { animation-duration: 0.4s; }
+body[data-lights="win-pac"] .bulb::after { animation-duration: 0.4s; }
 
 body[data-lights="win-ghost"] { --bulb: #ff0000; --frame: #ff0000; }
-body[data-lights="win-ghost"] .bulb { animation-duration: 0.4s; }
+body[data-lights="win-ghost"] .bulb::after { animation-duration: 0.4s; }
 
-body[data-lights="pause"] .bulb { animation-play-state: paused; opacity: 0.5; }
+body[data-lights="pause"] .bulb::after { animation-play-state: paused; opacity: 0.5; }
 
-@keyframes blink {
-  0%  { background: var(--lit); box-shadow: 0 0 10px 4px var(--lit); }
-  50% { background: var(--bulb-off); box-shadow: none; }
+@media (prefers-reduced-motion: reduce) {
+  .bulb::after, #crt { animation: none; }
+  .bulb::after { opacity: 0.6; }
 }
 
 body.fullscreen #help { display: none; }
