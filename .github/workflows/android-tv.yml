@@ -89,3 +89,61 @@ jobs:
           name: lint-report
           path: android/app/build/reports/lint-results-release.html
           if-no-files-found: ignore
+
+  # Installs the APK on an Android 17 emulator and starts it, so an install
+  # problem shows up here with Android's exact reason (INSTALL_FAILED_...).
+  install-test:
+    needs: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: PacManVersus-TV
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Start an Android 17 emulator
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          AVDM="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
+          "$SDKM" --list 2>/dev/null | grep -oE "system-images;android-37[^;| ]*;[a-z_]+;x86_64" | sort -u > images.txt || true
+          cat images.txt
+          IMG=$(grep -m1 ";google_apis;x86_64" images.txt || grep -m1 ";default;x86_64" images.txt || head -n1 images.txt)
+          test -n "$IMG" || { echo "no Android 17 x86_64 system image listed"; exit 1; }
+          echo "Using $IMG"
+          timeout 1200 "$SDKM" --install "$IMG" "emulator" "platform-tools" > /dev/null
+          echo no | "$AVDM" create avd -n a17 -k "$IMG" --force
+          nohup "$ANDROID_HOME/emulator/emulator" -avd a17 -no-window -no-audio -no-boot-anim -no-snapshot \
+            -gpu swiftshader_indirect -memory 3072 > emulator.log 2>&1 &
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          timeout 600 "$ADB" wait-for-device
+          timeout 900 bash -c "until [ \"\$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')\" = 1 ]; do sleep 5; done"
+          echo "Android SDK level: $($ADB shell getprop ro.build.version.sdk)  release: $($ADB shell getprop ro.build.version.release)"
+
+      - name: Install and launch the APK
+        run: |
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          "$ADB" install -r PacManVersus-TV.apk 2>&1 | tee install.txt
+          grep -q Success install.txt
+          "$ADB" shell dumpsys package io.github.pchessman.pacmanversus | grep -E "versionCode|versionName|targetSdk|minSdk" | head -n 5
+          "$ADB" logcat -c
+          "$ADB" shell am start -W -n io.github.pchessman.pacmanversus/.MainActivity
+          sleep 15
+          "$ADB" exec-out screencap -p > running.png
+          "$ADB" logcat -d | grep -E "AndroidRuntime|FATAL|PacManVersus|chromium.*(Uncaught|Error)" | tail -n 40 || true
+          "$ADB" shell pidof io.github.pchessman.pacmanversus || { echo "app is not running"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android17-install-test
+          path: |
+            running.png
+            install.txt
+            emulator.log
+          if-no-files-found: ignore
