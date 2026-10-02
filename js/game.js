@@ -65,8 +65,9 @@ class Game {
     this.maze.onTake = (c, r, ch) => {
       if (ch !== '.') return;
       const k = this.k, g = this.boardLayer.getContext('2d');
+      g.setTransform(k, 0, 0, k, 0, 0); // set explicitly so the scale is applied exactly once
       g.fillStyle = '#000';
-      g.fillRect((c * T + T / 2 - 2) * k, (r * T + T / 2 - 2) * k, 4 * k, 4 * k);
+      g.fillRect(c * T + T / 2 - 2, r * T + T / 2 - 2, 4, 4);
     };
 
     this.setScale(1);
