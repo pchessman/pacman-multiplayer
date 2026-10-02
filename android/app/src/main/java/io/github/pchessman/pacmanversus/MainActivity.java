@@ -305,14 +305,15 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
+        // Back (remote or controller): before Android 13 it arrives as a key; from 13 on the
+        // system sends it straight to backCallback instead.
+        if (Build.VERSION.SDK_INT < 33 && e.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+            if (e.getAction() == KeyEvent.ACTION_UP && !e.isCanceled()) goBack();
+            return true;
+        }
         if (isController(e)) {
             handleControllerKey(e);
             return true; // consumed: never becomes a shared arrow key in the page
-        }
-        // Before Android 13 the remote's Back comes in as a key; later it goes to backCallback.
-        if (e.getKeyCode() == KeyEvent.KEYCODE_BACK && Build.VERSION.SDK_INT < 33) {
-            if (e.getAction() == KeyEvent.ACTION_UP && !e.isCanceled()) goBack();
-            return true;
         }
         return super.dispatchKeyEvent(e); // TV remote D-pad / OK go to the page as keys
     }
@@ -331,8 +332,7 @@ public class MainActivity extends Activity implements InputManager.InputDeviceLi
             case KeyEvent.KEYCODE_DPAD_RIGHT: keyDirection(id, down, "right"); break;
             case KeyEvent.KEYCODE_BUTTON_A:
             case KeyEvent.KEYCODE_DPAD_CENTER: button(id, down, "a"); break;
-            case KeyEvent.KEYCODE_BUTTON_B:
-            case KeyEvent.KEYCODE_BACK:        button(id, down, "b"); break;
+            case KeyEvent.KEYCODE_BUTTON_B:    button(id, down, "b"); break;
             case KeyEvent.KEYCODE_BUTTON_X:    button(id, down, "x"); break;
             case KeyEvent.KEYCODE_BUTTON_Y:    button(id, down, "y"); break;
             case KeyEvent.KEYCODE_BUTTON_L1:   button(id, down, "lb"); break;

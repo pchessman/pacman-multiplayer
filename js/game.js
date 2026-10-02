@@ -1385,11 +1385,6 @@ function toggleFullscreen() {
 
   if (TV_MODE) {
     document.body.classList.add('tv');
-    // controller hints instead of keyboard ones (text only, never markup)
-    const spans = help.querySelectorAll('span');
-    ['P1: CONTROLLER 1', 'P2: CONTROLLER 2', 'MENU: PAUSE', 'VIEW: MUTE', 'BACK: MENU'].forEach((txt, i) => {
-      if (spans[i]) spans[i].textContent = txt;
-    });
     // the TV remote's Back button (the app closes when this returns 'exit')
     Object.defineProperty(window, '__tvBack', { value: () => game.back(), writable: false, configurable: false });
     // the app going to the background / coming back: pause the match, silence everything
@@ -1406,7 +1401,16 @@ function toggleFullscreen() {
   // The control hints under the cabinet follow the mode and the key bindings (text only, never markup).
   const helpP1 = help.querySelector('.pac');
   game.onModeChange = mode => {
-    if (!helpP2 || TV_MODE) return;
+    if (TV_MODE) {
+      // controller hints instead of keyboard ones, following P1's bindings
+      const btn = action => Controls.buttonsFor(0, action).map(x => Controls.BUTTON_NAMES[x])[0] || '-';
+      const spans = help.querySelectorAll('span');
+      ['P1: CONTROLLER 1', 'P2: CONTROLLER 2', btn('pause') + ': PAUSE', btn('controls') + ': CONTROLS', 'BACK: MENU'].forEach((txt, i) => {
+        if (spans[i]) spans[i].textContent = txt;
+      });
+      return;
+    }
+    if (!helpP2) return;
     helpP1.textContent = 'PAC-MAN: ' + keysLabel(0);
     helpP2.textContent = (mode === 'versus' ? 'GHOST: ' : 'MS PAC-MAN: ') + keysLabel(1);
     helpP2.className = mode === 'versus' ? 'ghost' : 'ms';
