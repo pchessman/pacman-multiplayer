@@ -118,11 +118,13 @@ jobs:
           echo "Using $IMG"
           timeout 1200 "$SDKM" --install "$IMG" "emulator" "platform-tools" > /dev/null
           echo no | "$AVDM" create avd -n a17 -k "$IMG" --force
+          ls -l /dev/kvm || true
           nohup "$ANDROID_HOME/emulator/emulator" -avd a17 -no-window -no-audio -no-boot-anim -no-snapshot \
-            -gpu swiftshader_indirect -memory 3072 > emulator.log 2>&1 &
+            -no-metrics -accel on -gpu swiftshader_indirect -memory 3072 -cores 2 > emulator.log 2>&1 &
           ADB="$ANDROID_HOME/platform-tools/adb"
-          timeout 600 "$ADB" wait-for-device
-          timeout 900 bash -c "until [ \"\$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')\" = 1 ]; do sleep 5; done"
+          timeout 600 "$ADB" wait-for-device || { echo "--- emulator log ---"; tail -n 80 emulator.log; exit 1; }
+          timeout 900 bash -c "until [ \"\$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')\" = 1 ]; do sleep 5; done" \
+            || { echo "--- emulator log ---"; tail -n 80 emulator.log; exit 1; }
           echo "Android SDK level: $($ADB shell getprop ro.build.version.sdk)  release: $($ADB shell getprop ro.build.version.release)"
 
       - name: Install and launch the APK
