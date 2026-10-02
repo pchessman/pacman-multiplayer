@@ -87,6 +87,33 @@ const Sound = (() => {
     bass.forEach((n, i) => { if (n) blip(midi(n), step * 1.8, { type: 'triangle', vol: 0.25, delay: i * step * 2 }); });
   }
 
+  // Original jaunty loop for the intermissions (~6.7s).
+  function intermission() {
+    const step = 0.14;
+    const lead = [72, 0, 76, 79, 81, 0, 79, 76, 77, 0, 81, 84, 86, 0, 84, 81,
+                  79, 0, 76, 72, 74, 76, 77, 79, 76, 0, 74, 0, 72, 0, 0, 0,
+                  72, 0, 76, 79, 81, 0, 79, 76, 77, 0, 81, 84, 86, 0, 88, 86,
+                  84, 0, 79, 76, 77, 0, 74, 71, 72, 0, 0, 0, 0, 0, 0, 0];
+    const bass = [48, 55, 53, 60, 50, 57, 55, 50, 48, 55, 53, 60, 50, 55, 48, 0];
+    lead.forEach((n, i) => { if (n) blip(midi(n), step * 0.85, { vol: 0.055, delay: i * step }); });
+    bass.forEach((n, i) => { if (n) blip(midi(n), step * 3.6, { type: 'triangle', vol: 0.22, delay: i * step * 4 }); });
+    return lead.length * step;
+  }
+
+  function treatAppear() {
+    [84, 88, 91].forEach((n, i) => blip(midi(n), 0.06, { vol: 0.05, delay: i * 0.06 }));
+  }
+
+  function sugarRush() {
+    blip(300, 0.35, { type: 'square', vol: 0.06, to: 1400, exp: true });
+    blip(450, 0.35, { type: 'square', vol: 0.04, to: 2000, exp: true, delay: 0.12 });
+  }
+
+  function elroy() {
+    blip(1500, 0.06, { vol: 0.05 });
+    blip(1800, 0.06, { vol: 0.05, delay: 0.08 });
+  }
+
   function win() {
     [72, 76, 79, 84, 88, 91, 96].forEach((n, i) => blip(midi(n), 0.12, { vol: 0.07, delay: i * 0.09 }));
   }
@@ -96,7 +123,7 @@ const Sound = (() => {
   }
 
   // Looping background siren: 'off' | 'normal' | 'fright' | 'eyes'.
-  function setSiren(mode, progress = 0) {
+  function setSiren(mode, progress = 0, fast = 0) {
     if (!ac) return;
     if (!siren) {
       const osc = ac.createOscillator();
@@ -114,7 +141,7 @@ const Sound = (() => {
       lfo.start();
       siren = { osc, lfo, depth, gain };
     }
-    const key = mode + ':' + Math.round(progress * 8);
+    const key = mode + ':' + Math.round(progress * 8) + ':' + fast;
     if (key === sirenKey) return;
     sirenKey = key;
     const now = ac.currentTime;
@@ -122,7 +149,7 @@ const Sound = (() => {
     if (mode === 'normal') {
       siren.lfo.type = 'sine';
       set(siren.osc.frequency, 380 + 260 * progress);
-      set(siren.lfo.frequency, 3 + progress * 2);
+      set(siren.lfo.frequency, 3 + progress * 2 + fast * 1.5);
       set(siren.depth.gain, 110);
       set(siren.gain.gain, 0.045);
     } else if (mode === 'fright') {
@@ -149,7 +176,8 @@ const Sound = (() => {
   }
 
   return {
-    init, waka, eatGhost, fruit, extraLife, menu, death, intro, win, lose, setSiren, toggleMute,
+    init, waka, eatGhost, fruit, extraLife, menu, death, intro, intermission, treatAppear, sugarRush, elroy,
+    win, lose, setSiren, toggleMute,
     get muted() { return muted; },
   };
 })();

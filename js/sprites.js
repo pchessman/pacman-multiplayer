@@ -24,6 +24,10 @@ const Sprites = (() => {
     return c;
   }
 
+  function art(put, rows, pal) {
+    rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) if (pal[row[x]]) put(x, y, pal[row[x]]); });
+  }
+
   const inCircle = (x, y, cx, cy, r) => (x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= r * r;
 
   function line(put, x0, y0, x1, y1, color) {
@@ -150,6 +154,77 @@ const Sprites = (() => {
     '.....rr.....',
   ];
 
+  const GALAXIAN = [
+    '............',
+    '.....yy.....',
+    '....yyyy....',
+    'b..yyyyyy..b',
+    'b.yyrrrryy.b',
+    'bbyrrrrrrybb',
+    'bbbrryyrrbbb',
+    'bb..rrrr..bb',
+    'b....rr....b',
+    '.....rr.....',
+    '.....rr.....',
+    '............',
+  ];
+  const BELL = [
+    '.....yy.....',
+    '....yyyy....',
+    '...yyyyyy...',
+    '..yyyyyyyy..',
+    '..ywyyyyyy..',
+    '..ywyyyyyy..',
+    '.yywyyyyyyy.',
+    '.yyyyyyyyyy.',
+    'yyyyyyyyyyyy',
+    'cccccccccccc',
+    '.....dd.....',
+    '....dddd....',
+  ];
+  const KEY = [
+    '...cccccc...',
+    '..cc....cc..',
+    '..cc....cc..',
+    '...cccccc...',
+    '.....ww.....',
+    '.....ww.....',
+    '.....wwww...',
+    '.....ww.....',
+    '.....www....',
+    '.....ww.....',
+    '.....wwww...',
+    '.....ww.....',
+  ];
+  const ICECREAM = [
+    '.....rr.....',
+    '....pppp....',
+    '...pppppp...',
+    '..ppwppppp..',
+    '..pppppppp..',
+    '..pppppppp..',
+    '..tttttttt..',
+    '...txtxtt...',
+    '...ttxtxt...',
+    '....txtt....',
+    '.....tx.....',
+    '.....tt.....',
+  ];
+  const CUPCAKE = [
+    '.....r......',
+    '....wwww....',
+    '...wwwwww...',
+    '..wwswwsww..',
+    '.wwwwwwwwww.',
+    '.swwwwswwws.',
+    '..gggggggg..',
+    '..gkgkgkgk..',
+    '..gkgkgkgk..',
+    '...gkgkgk...',
+    '...gggggg...',
+    '............',
+  ];
+
   const FRUIT_PAINTERS = {
     cherry(put) {
       line(put, 4, 5, 10, 1, '#DE9751');
@@ -161,8 +236,16 @@ const Sprites = (() => {
       put(8, 8, '#FFFFFF');
     },
     strawberry(put) {
-      const pal = { r: '#FF0000', w: '#FFFFFF', g: '#00DE00' };
-      STRAWBERRY.forEach((row, y) => [...row].forEach((ch, x) => { if (pal[ch]) put(x, y, pal[ch]); }));
+      art(put, STRAWBERRY, { r: '#FF0000', w: '#FFFFFF', g: '#00DE00' });
+    },
+    galaxian(put) {
+      art(put, GALAXIAN, { y: '#FFFF00', r: '#FF0000', b: '#2121FF' });
+    },
+    bell(put) {
+      art(put, BELL, { y: '#FFFF00', w: '#FFFFFF', c: '#00FFFF', d: '#DEDEDE' });
+    },
+    key(put) {
+      art(put, KEY, { c: '#00FFFF', w: '#DEDEDE' });
     },
     orange(put) {
       for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) if (inCircle(x, y, 6, 6.8, 4.9)) put(x, y, '#FFB852');
@@ -192,5 +275,76 @@ const Sprites = (() => {
 
   const fruit = kind => make(`fruit:${kind}`, 12, 12, FRUIT_PAINTERS[kind]);
 
-  return { pac, ghost, ghostEyes, frightGhost, dot, pellet, fruit };
+  /* ---------- Bonus treats (12x12) ---------- */
+
+  const TREAT_PAINTERS = {
+    icecream(put) {
+      art(put, ICECREAM, { r: '#FF0000', p: '#FF8FD0', w: '#FFFFFF', t: '#DE9751', x: '#A0612A' });
+    },
+    cupcake(put) {
+      art(put, CUPCAKE, { r: '#FF0000', w: '#FFD8EC', s: '#00FFFF', g: '#C890FF', k: '#8A4FD0' });
+    },
+    donut(put) {
+      const sprinkles = { '3,4': '#00FFFF', '8,3': '#FFFF00', '9,7': '#00FF00', '4,8': '#FFFFFF', '6,2': '#00FF00', '2,6': '#FFFF00' };
+      for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) {
+        if (!inCircle(x, y, 6, 6, 5.6) || inCircle(x, y, 6, 6, 1.9)) continue;
+        const frosted = inCircle(x, y, 6, 5.6, 4.6) && !inCircle(x, y, 6, 6, 2.6);
+        put(x, y, sprinkles[`${x},${y}`] || (frosted ? '#FF6FB8' : '#DE9751'));
+      }
+    },
+    lollipop(put) {
+      for (let y = 0; y < 9; y++) for (let x = 0; x < 12; x++) {
+        if (!inCircle(x, y, 6, 4.5, 4.4)) continue;
+        const a = Math.atan2(y + 0.5 - 4.5, x + 0.5 - 6) + Math.hypot(y + 0.5 - 4.5, x + 0.5 - 6) * 0.9;
+        put(x, y, Math.floor((a + Math.PI * 4) / (Math.PI / 3)) % 2 ? '#FF2A6D' : '#FFFFFF');
+      }
+      for (let y = 9; y < 12; y++) put(6, y, '#DEDEDE');
+    },
+  };
+
+  const treat = kind => make(`treat:${kind}`, 12, 12, TREAT_PAINTERS[kind]);
+
+  /* ---------- Intermission props ---------- */
+
+  // Blinky after his sheet snags on the nail: the right of his skirt is gone.
+  function tornGhost(frame, dir) {
+    return make(`torn:${frame}:${dirKey(dir)}`, 14, 14, put => {
+      body(put, '#FF0000', frame);
+      for (let y = 11; y < 14; y++) for (let x = 7; x < 14; x++) put(x, y, '#000000');
+      for (const [x, y] of [[8, 11], [9, 11], [8, 12], [9, 12], [8, 13], [9, 13], [10, 13]]) put(x, y, '#FFB8AE');
+      eyes(put, dir);
+    });
+  }
+
+  // Blinky with his torn sheet stitched up.
+  function patchedGhost(frame, dir) {
+    return make(`patch:${frame}:${dirKey(dir)}`, 14, 14, put => {
+      body(put, '#FF0000', frame);
+      for (let y = 9; y < 13; y++) for (let x = 8; x < 12; x++) put(x, y, '#DEB887');
+      for (const [x, y] of [[8, 9], [10, 9], [11, 10], [8, 11], [11, 12], [9, 12]]) put(x, y, '#000000');
+      eyes(put, dir);
+    });
+  }
+
+  // Blinky without his sheet, scuttling to the right.
+  function nakedGhost(frame) {
+    return make(`naked:${frame}`, 16, 10, put => {
+      for (let y = 0; y < 7; y++) for (let x = 0; x < 16; x++) {
+        const nx = (x + 0.5 - 8) / 7.5, ny = (y + 0.5 - 4) / 3.4;
+        if (nx * nx + ny * ny <= 1) put(x, y, '#FF0000');
+      }
+      for (const [x, y] of [[10, 2], [13, 2]]) { put(x, y, '#DEDEFF'); put(x + 1, y, '#2121DE'); }
+      const legs = frame ? [2, 5, 8, 11] : [3, 6, 9, 12];
+      for (const x of legs) { put(x, 7, '#FF0000'); put(x + (frame ? 1 : -1), 8, '#FF0000'); }
+    });
+  }
+
+  const cloak = () => make('cloak', 14, 14, put => body(put, '#FF0000', 0));
+
+  const nail = () => make('nail', 3, 6, put => {
+    for (let x = 0; x < 3; x++) put(x, 0, '#DEDEDE');
+    for (let y = 1; y < 6; y++) put(1, y, '#A0A0A0');
+  });
+
+  return { pac, ghost, ghostEyes, frightGhost, dot, pellet, fruit, treat, tornGhost, patchedGhost, nakedGhost, cloak, nail };
 })();
