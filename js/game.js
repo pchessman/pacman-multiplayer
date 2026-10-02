@@ -1156,7 +1156,8 @@ function toggleFullscreen() {
     if (game.state === 'title' && !Sound.themePlaying()) Sound.playTheme(true);
   };
   Theme.restore();
-  Theme.bundled();
+  // sounds/theme.mp3 only exists in local copies (it's git-ignored), so only look for it there
+  if (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1') Theme.bundled();
 
   window.addEventListener('keydown', e => {
     // leave browser and OS shortcuts alone
