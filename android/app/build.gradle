@@ -1,3 +1,5 @@
+import org.gradle.api.tasks.util.PatternFilterable
+
 plugins {
     id 'com.android.application'
 }
@@ -14,7 +16,9 @@ abstract class WebAssetsTask extends DefaultTask {
     @InputFiles
     @PathSensitive(PathSensitivity.RELATIVE)
     FileTree getSources() {
-        return webRoot.get().asFileTree.matching { it.include(includes.get()) }
+        // read the list out here: inside the closure `includes` would mean the pattern's own
+        List<String> wanted = includes.get()
+        return webRoot.get().asFileTree.matching { PatternFilterable p -> p.include(wanted) }
     }
 
     @OutputDirectory
@@ -26,9 +30,10 @@ abstract class WebAssetsTask extends DefaultTask {
     @TaskAction
     void copy() {
         def src = sources
-        fs.sync {
-            it.from(src)
-            it.into(outputDir.dir('www'))
+        def dest = outputDir.dir('www')
+        fs.sync { CopySpec spec ->
+            spec.from(src)
+            spec.into(dest)
         }
     }
 }
