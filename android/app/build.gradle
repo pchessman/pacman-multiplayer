@@ -51,8 +51,10 @@ android {
         applicationId = 'io.github.pchessman.pacmanversus'
         minSdk = 24        // androidx.webkit 1.16 needs Android 7.0+
         targetSdk = 37     // Android 17
-        versionCode = 2
-        versionName = '2.0'
+        // CI builds count up with the run number, so every new APK installs over the last one
+        def run = (System.getenv('GITHUB_RUN_NUMBER') ?: '0') as int
+        versionCode = 100 + run
+        versionName = run ? "2.0.${run}" : '2.0'
     }
 
     // Optional stable signing key from the environment (see README). Without it
