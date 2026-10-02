@@ -4,6 +4,9 @@
              together against the AI ghosts. */
 'use strict';
 
+// Set by the Android TV app (index.html?tv=1): controller-first hints, TV-friendly rendering.
+const TV_MODE = new URLSearchParams(location.search).get('tv') === '1';
+
 class Game {
   constructor(canvas) {
     this.canvas = canvas;
@@ -716,6 +719,27 @@ class Game {
     if (Sound.hasTheme()) Sound.playTheme(true);
   }
 
+  // Controller buttons (see input.js). Directions arrive as the owning player's keys.
+  //   A: start / confirm / resume   B: back   MENU: pause   VIEW: mute
+  onPadButton(name) {
+    const s = this.state;
+    if (name === 'view') { this.onKey('KeyM', false); return; }
+    if (name === 'menu') { if (!['title', 'over', 'cutscene'].includes(s)) this.onKey('KeyP', false); return; }
+    if (name === 'a') { this.onKey(this.paused ? 'KeyP' : 'Enter', false); return; }
+    if (name === 'b') this.back();
+  }
+
+  // B on a controller, or the TV remote's Back. Returns 'exit' on the title screen
+  // so the TV app knows to close.
+  back() {
+    if (this.state === 'title') return 'exit';
+    if (this.paused) this.onKey('KeyQ', false);
+    else if (this.state === 'over') this.onKey('Escape', false);
+    else if (this.state === 'cutscene') this.onKey('Enter', false);
+    else this.onKey('KeyP', false);
+    return 'ok';
+  }
+
   pauseIfActive() {
     if (!['title', 'over', 'cutscene'].includes(this.state) && !this.paused) {
       this.paused = true;
@@ -1060,9 +1084,14 @@ class Game {
     c.fillStyle = 'rgba(0,0,0,0.7)';
     c.fillRect(0, 2 * T, WIDTH, HEIGHT - 4 * T);
     if (Math.floor(performance.now() / 400) % 2 === 0) this.text('PAUSED', mid, 14 * T, COLOR.pac, 16, 'center');
-    this.text('P  RESUME', mid, 17 * T, COLOR.text, 8, 'center');
-    this.text('Q  QUIT TO MENU', mid, 18.5 * T, COLOR.text, 8, 'center');
-    this.text('F  FULLSCREEN', mid, 20 * T, COLOR.text, 8, 'center');
+    if (TV_MODE) {
+      this.text('A / MENU  RESUME', mid, 17 * T, COLOR.text, 8, 'center');
+      this.text('B / BACK  QUIT TO MENU', mid, 18.5 * T, COLOR.text, 8, 'center');
+    } else {
+      this.text('P  RESUME', mid, 17 * T, COLOR.text, 8, 'center');
+      this.text('Q  QUIT TO MENU', mid, 18.5 * T, COLOR.text, 8, 'center');
+      this.text('F  FULLSCREEN', mid, 20 * T, COLOR.text, 8, 'center');
+    }
     this.text('TIP: GHOSTS CAN\'T TURN UP RIGHT', mid, 23 * T, COLOR.grey, 8, 'center');
     this.text('ABOVE OR BELOW THE GHOST HOUSE', mid, 24 * T, COLOR.grey, 8, 'center');
   }
@@ -1100,14 +1129,18 @@ class Game {
     if (opts[this.menuIndex].key === 'mode') this.text(MODE_BLURBS[s.mode], mid, 28.5 * T, COLOR.pink, 8, 'center');
     else this.text('UP/DOWN SELECT   LEFT/RIGHT CHANGE', mid, 28.5 * T, COLOR.grey, 8, 'center');
 
+    // who controls whom: keys on a computer, controllers on the TV (shown once joined)
+    const p2Pac = s.mode !== 'versus', p2Col = p2Pac ? COLOR.pink : COLOR.red;
+    const how = (slot, keys, padKeys) => TV_MODE
+      ? (Pads.joined(slot) ? 'CONTROLLER' : (Math.floor(t * 2.5) % 2 ? 'PRESS A' : ''))
+      : (Pads.joined(slot) ? padKeys : keys);
     this.text('PAC-MAN', 4 * T, 29.6 * T, COLOR.pac);
-    this.text('W A S D', 16 * T, 29.6 * T, COLOR.pac);
-    const p2Pac = s.mode !== 'versus';
-    if (p2Pac) this.text('MS PAC-MAN', 4 * T, 30.9 * T, COLOR.pink);
-    else this.text('GHOST', 4 * T, 30.9 * T, COLOR.red);
-    this.text('ARROWS', 16 * T, 30.9 * T, p2Pac ? COLOR.pink : COLOR.red);
-    if (Math.floor(t * 2.5) % 2 === 0) this.text('PRESS ENTER TO START', mid, 32.5 * T, COLOR.text, 16, 'center');
-    this.text('P PAUSE  M MUTE  F FULLSCREEN  T THEME', mid, 34.5 * T, COLOR.grey, 8, 'center');
+    this.text(how(0, 'W A S D', 'WASD/PAD'), 16 * T, 29.6 * T, COLOR.pac);
+    this.text(p2Pac ? 'MS PAC-MAN' : 'GHOST', 4 * T, 30.9 * T, p2Col);
+    this.text(how(1, 'ARROWS', 'ARROWS/PAD'), 16 * T, 30.9 * T, p2Col);
+    const start = TV_MODE ? 'PRESS A TO START' : Pads.joined(0) || Pads.joined(1) ? 'PRESS ENTER / A' : 'PRESS ENTER TO START';
+    if (Math.floor(t * 2.5) % 2 === 0) this.text(start, mid, 32.5 * T, COLOR.text, 16, 'center');
+    this.text(TV_MODE ? 'A START  B BACK  MENU PAUSE  Y SWAP P1/P2' : 'P PAUSE  M MUTE  F FULLSCREEN  T THEME', mid, 34.5 * T, COLOR.grey, 8, 'center');
   }
 
   // Small pixel triangle marking more options above (dir -1) or below (dir 1).
@@ -1204,17 +1237,29 @@ function toggleFullscreen() {
   const help = document.getElementById('help');
   const helpP2 = document.getElementById('help-p2');
   const BULB_COLORS = ['#FF0000', '#FFB8FF', '#00FFFF', '#FFB852', '#FFFF00'];
+  Pads.attach(game);
+
+  if (TV_MODE) {
+    document.body.classList.add('tv');
+    // controller hints instead of keyboard ones (text only, never markup)
+    const spans = help.querySelectorAll('span');
+    ['P1: CONTROLLER 1', 'P2: CONTROLLER 2', 'MENU: PAUSE', 'VIEW: MUTE', 'BACK: MENU'].forEach((txt, i) => {
+      if (spans[i]) spans[i].textContent = txt;
+    });
+    // the TV remote's Back button (the app closes when this returns 'exit')
+    Object.defineProperty(window, '__tvBack', { value: () => game.back(), writable: false, configurable: false });
+  }
 
   // The control hint under the cabinet follows the chosen mode (text only, never markup).
   game.onModeChange = mode => {
-    if (!helpP2) return;
+    if (!helpP2 || TV_MODE) return;
     helpP2.textContent = mode === 'versus' ? 'GHOST: ARROWS' : 'MS PAC-MAN: ARROWS';
     helpP2.className = mode === 'versus' ? 'ghost' : 'ms';
   };
   game.onModeChange(game.settings.mode);
 
   function layoutBulbs() {
-    const w = bezel.clientWidth, h = bezel.clientHeight, inset = 7, gap = 20;
+    const w = bezel.clientWidth, h = bezel.clientHeight, inset = 7, gap = TV_MODE ? 30 : 20; // fewer bulbs on TV hardware
     const pts = [];
     const nx = Math.max(2, Math.round((w - 2 * inset) / gap));
     const ny = Math.max(2, Math.round((h - 2 * inset) / gap));
@@ -1240,13 +1285,15 @@ function toggleFullscreen() {
     document.body.classList.toggle('fullscreen', !!document.fullscreenElement);
     const pad = 2 * 14 + 4; // bezel padding + frame
     const helpH = document.fullscreenElement ? 0 : help.offsetHeight + 10;
-    const availW = window.innerWidth - (document.fullscreenElement ? 0 : 32) - pad;
-    const availH = window.innerHeight - helpH - pad - 12;
+    const safeW = TV_MODE ? window.innerWidth * 0.06 : 0, safeH = TV_MODE ? window.innerHeight * 0.06 : 0; // TV overscan margin
+    const availW = window.innerWidth - (document.fullscreenElement ? 0 : 32) - pad - safeW;
+    const availH = window.innerHeight - helpH - pad - 12 - safeH;
     const s = Math.max(0.3, Math.min(availW / WIDTH, availH / HEIGHT));
     const size = Math.floor(WIDTH * s) + 'x' + Math.floor(HEIGHT * s);
     canvas.style.width = Math.floor(WIDTH * s) + 'px';
     canvas.style.height = Math.floor(HEIGHT * s) + 'px';
-    game.setScale(Math.min(4, Math.max(1, Math.ceil(s * (window.devicePixelRatio || 1)))));
+    // TV chips are slower: cap the render scale at 2x there (still sharp at couch distance)
+    game.setScale(Math.min(TV_MODE ? 2 : 4, Math.max(1, Math.ceil(s * (window.devicePixelRatio || 1)))));
     if (size !== lastSize) { lastSize = size; layoutBulbs(); }
   }
   let resizeQueued = false;
@@ -1264,7 +1311,8 @@ function toggleFullscreen() {
   };
   Theme.restore();
   // sounds/theme.mp3 only exists in local copies (it's git-ignored), so only look for it there
-  if (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1') Theme.bundled();
+  const localCopy = location.protocol === 'file:' || ['localhost', '127.0.0.1', 'appassets.androidplatform.net'].includes(location.hostname);
+  if (localCopy) Theme.bundled();
 
   window.addEventListener('keydown', e => {
     // leave browser and OS shortcuts alone
@@ -1281,6 +1329,7 @@ function toggleFullscreen() {
   function frame(now) {
     const dt = Math.max(0, Math.min((now - last) / 1000, 0.05));
     last = now;
+    Pads.poll();
     game.update(dt);
     game.render();
     requestAnimationFrame(frame);

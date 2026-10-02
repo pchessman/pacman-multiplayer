@@ -14,6 +14,27 @@ Open `index.html` in any modern browser. There's no build step and no server to 
 
 Turns are buffered, so you can press a direction early and the character takes it at the next opening.
 
+## Controllers
+
+Xbox and other Bluetooth/USB gamepads work in the browser and in the TV app.
+
+- **One controller, one player.** The first controller to press any button becomes **P1**, the second becomes **P2**, and any others are ignored. P1's controller only ever moves P1, and P2's only moves P2: the ghost in VS, Ms. Pac-Man in Co-op and Duel. Press **Y** on the title screen to swap them. Unplugging or turning off a controller frees its spot.
+- **Buttons:** D-pad or left stick to move or change menu options, **A** to start, confirm or resume, **B** to go back (pause, then quit to the menu), **Menu** to pause, **View** to mute.
+- The keyboard still works alongside, so W A S D drives P1 and the arrows drive P2.
+
+## Android TV / Google TV app
+
+`android/` is a small native app that runs this exact game on a TV.
+
+- **Getting the APK:** every push builds one on GitHub. Open the repository's **Actions** tab, pick the latest **Android TV APK** run, and download **PacManVersus-TV**.
+- **Installing:** on the TV, turn on *Developer options*, then allow installs from unknown sources for the app you'll install with. Then either open the APK with a file manager, or from a computer run `adb connect <tv-ip>` and `adb install PacManVersus-TV.apk`. It appears on the home screen with its own banner.
+- **Controllers:** pair them in *Settings → Remotes & Accessories*. Each physical controller is tracked separately by the app, so one controller can never move both players. The TV remote's D-pad and OK button navigate the menus, and **Back** pauses, then returns to the menu, then exits.
+- **Built for TV:** fullscreen, the screen stays on, edges sit inside the TV's safe area, and rendering is capped at 2× for TV chips.
+- **Locked down:** the app has no internet permission at all, and the game loads only from files inside the APK. No JavaScript-to-Android bridge is exposed, and the page can't navigate anywhere else.
+- **Theme song:** put your MP3 at `sounds/theme.mp3` before building locally and it gets bundled into your own APK. It never goes to GitHub.
+- **Updating without losing high scores:** by default each build is signed with a throwaway key, so installing a newer build means uninstalling the old one first. To keep one key, add these repository secrets and every build signs with it: `PACVS_KEYSTORE_B64` (a base64 keystore), `PACVS_STORE_PASSWORD`, `PACVS_KEY_ALIAS` and `PACVS_KEY_PASSWORD`.
+- **Building locally:** use JDK 17 and the Android SDK, then run `cd android && ./gradlew assembleRelease`.
+
 ## Rules
 
 - **Endless (default).** Levels never stop. The ghost's job is to end the run, and Pac-Man's is to get as far as possible. The results screen shows the level reached and your best ever. Unlike the arcade, there's no level-256 "split screen" crash, so the game keeps going.
@@ -111,6 +132,8 @@ The menu shows five rows at a time and scrolls. Settings and the high score are 
 - `js/actors.js`: maze, grid movement, Pac-Man, ghosts and treats
 - `js/cutscenes.js`: the three intermission acts
 - `js/theme.js`: the optional theme song (file checks, browser-only storage)
+- `js/input.js`: game controllers (one controller per player)
+- `android/`: the Android TV / Google TV app, and `.github/workflows/android-tv.yml`, which builds its APK
 - `js/game.js`: rules, game states, rendering and input
 - `js/sprites.js`: pixel-art sprites at native arcade resolution
 - `js/audio.js`: synthesized Web Audio sound effects and an original chiptune jingle

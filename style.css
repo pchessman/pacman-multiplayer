@@ -167,3 +167,9 @@ body.fullscreen { padding-inline: 0; }
 #help .pac { color: #ffff00; }
 #help .ghost { color: #ff0000; }
 #help .ms { color: #ffb8ff; }
+
+/* Android TV app: keep everything inside the TV's safe area (some sets crop the
+   edges), drop the CRT flicker, and give the controller hints room to breathe. */
+body.tv { padding: 3vh 3vw; }
+body.tv #crt { animation: none; }
+body.tv #help { font-size: 12px; gap: 8px 28px; }

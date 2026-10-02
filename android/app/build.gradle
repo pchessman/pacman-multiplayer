@@ -1,0 +1,65 @@
+plugins {
+    id 'com.android.application'
+}
+
+// The game itself is the web app in the repository root; it is copied into the
+// APK's assets at build time so there is a single source of truth.
+def webRoot = rootProject.file('..')
+def webAssets = layout.buildDirectory.dir('generated/webassets')
+
+android {
+    namespace 'io.github.pchessman.pacmanversus'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'io.github.pchessman.pacmanversus'
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    // Optional stable signing key from the environment (see README). Without it
+    // the release build is signed with the debug key so it can still be sideloaded.
+    def ks = System.getenv('PACVS_KEYSTORE')
+    signingConfigs {
+        if (ks) {
+            release {
+                storeFile file(ks)
+                storePassword System.getenv('PACVS_STORE_PASSWORD')
+                keyAlias System.getenv('PACVS_KEY_ALIAS')
+                keyPassword System.getenv('PACVS_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig ks ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    sourceSets {
+        main {
+            assets.srcDirs += webAssets
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'
+}
+
+tasks.register('copyWebAssets', Sync) {
+    from(webRoot) {
+        include 'index.html', 'style.css', 'js/**', 'fonts/**', 'sounds/**'
+    }
+    into webAssets.map { it.dir('www') }
+}
+preBuild.dependsOn 'copyWebAssets'
