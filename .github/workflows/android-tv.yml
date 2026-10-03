@@ -152,9 +152,12 @@ jobs:
           done
           grep -q Success install.txt
           "$ADB" shell dumpsys package io.github.pchessman.pacmanversus | grep -E "versionCode|versionName|targetSdk|minSdk" | head -n 5
-          "$ADB" logcat -c
-          "$ADB" shell am start -W -n io.github.pchessman.pacmanversus/.MainActivity
-          sleep 15
+          "$ADB" logcat -c || true
+          for i in 1 2 3 4; do
+            "$ADB" shell am start -n io.github.pchessman.pacmanversus/.MainActivity && break
+            sleep 10
+          done
+          sleep 25
           "$ADB" exec-out screencap -p > running.png
           "$ADB" logcat -d | grep -E "AndroidRuntime|FATAL|PacManVersus|chromium.*(Uncaught|Error)" | tail -n 40 || true
           "$ADB" shell pidof io.github.pchessman.pacmanversus || { echo "app is not running"; exit 1; }
