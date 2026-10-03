@@ -139,7 +139,17 @@ jobs:
       - name: Install and launch the APK
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
-          "$ADB" install -r PacManVersus-TV.apk 2>&1 | tee install.txt
+          # boot_completed can come before the package service is ready: wait for it, then retry
+          timeout 300 bash -c "until $ADB shell pm path android 2>/dev/null | grep -q package:; do sleep 5; done"
+          sleep 20
+          for i in 1 2 3 4 5 6; do
+            "$ADB" install -r PacManVersus-TV.apk > install.txt 2>&1 || true
+            cat install.txt
+            grep -q Success install.txt && break
+            # only retry when the device wasn't ready; a real INSTALL_FAILED_ reason stops here
+            grep -q INSTALL_FAILED install.txt && break
+            sleep 15
+          done
           grep -q Success install.txt
           "$ADB" shell dumpsys package io.github.pchessman.pacmanversus | grep -E "versionCode|versionName|targetSdk|minSdk" | head -n 5
           "$ADB" logcat -c
