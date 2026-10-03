@@ -109,6 +109,10 @@ jobs:
 
       - name: Start an Android 17 emulator
         run: |
+          # avdmanager and the emulator must look in the same place for the virtual device
+          export ANDROID_AVD_HOME="$HOME/.android/avd" ANDROID_SDK_ROOT="$ANDROID_HOME"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           AVDM="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
           "$SDKM" --list 2>/dev/null | grep -oE "system-images;android-37[^;| ]*;[a-z_]+;x86_64" | sort -u > images.txt || true
@@ -117,11 +121,14 @@ jobs:
           test -n "$IMG" || { echo "no Android 17 x86_64 system image listed"; exit 1; }
           echo "Using $IMG"
           timeout 1200 "$SDKM" --install "$IMG" "emulator" "platform-tools" > /dev/null
-          echo no | "$AVDM" create avd -n a17 -k "$IMG" --force
+          echo no | "$AVDM" create avd -n a17 -k "$IMG" --force -p "$ANDROID_AVD_HOME/a17.avd"
+          "$ANDROID_HOME/emulator/emulator" -list-avds
           ls -l /dev/kvm || true
           nohup "$ANDROID_HOME/emulator/emulator" -avd a17 -no-window -no-audio -no-boot-anim -no-snapshot \
             -no-metrics -accel on -gpu swiftshader_indirect -memory 3072 -cores 2 > emulator.log 2>&1 &
           ADB="$ANDROID_HOME/platform-tools/adb"
+          sleep 20
+          pgrep -f "qemu-system|emulator.*a17" > /dev/null || { echo "emulator exited"; tail -n 80 emulator.log; exit 1; }
           timeout 600 "$ADB" wait-for-device || { echo "--- emulator log ---"; tail -n 80 emulator.log; exit 1; }
           timeout 900 bash -c "until [ \"\$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')\" = 1 ]; do sleep 5; done" \
             || { echo "--- emulator log ---"; tail -n 80 emulator.log; exit 1; }
