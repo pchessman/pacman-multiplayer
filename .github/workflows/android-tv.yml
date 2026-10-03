@@ -125,7 +125,8 @@ jobs:
           "$ANDROID_HOME/emulator/emulator" -list-avds
           ls -l /dev/kvm || true
           nohup "$ANDROID_HOME/emulator/emulator" -avd a17 -no-window -no-audio -no-boot-anim -no-snapshot \
-            -no-metrics -accel on -gpu swiftshader_indirect -memory 3072 -cores 2 > emulator.log 2>&1 &
+            -no-metrics -accel on -gpu swiftshader_indirect -memory 3072 -cores 2 \
+            -partition-size 6144 -wipe-data > emulator.log 2>&1 &
           ADB="$ANDROID_HOME/platform-tools/adb"
           sleep 20
           pgrep -f "qemu-system|emulator.*a17" > /dev/null || { echo "emulator exited"; tail -n 80 emulator.log; exit 1; }
@@ -133,6 +134,7 @@ jobs:
           timeout 900 bash -c "until [ \"\$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')\" = 1 ]; do sleep 5; done" \
             || { echo "--- emulator log ---"; tail -n 80 emulator.log; exit 1; }
           echo "Android SDK level: $($ADB shell getprop ro.build.version.sdk)  release: $($ADB shell getprop ro.build.version.release)"
+          "$ADB" shell df -h /data || true
 
       - name: Install and launch the APK
         run: |
