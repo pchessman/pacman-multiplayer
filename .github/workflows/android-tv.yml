@@ -125,7 +125,7 @@ jobs:
           "$ANDROID_HOME/emulator/emulator" -list-avds
           ls -l /dev/kvm || true
           nohup "$ANDROID_HOME/emulator/emulator" -avd a17 -no-window -no-audio -no-boot-anim -no-snapshot \
-            -no-metrics -accel on -gpu swiftshader_indirect -memory 3072 -cores 2 \
+            -no-metrics -accel on -gpu swangle_indirect -memory 3072 -cores 2 \
             -partition-size 6144 -wipe-data > emulator.log 2>&1 &
           ADB="$ANDROID_HOME/platform-tools/adb"
           sleep 20
@@ -158,12 +158,18 @@ jobs:
             sleep 10
           done
           sleep 25
-          "$ADB" exec-out screencap -p > running.png
+          "$ADB" exec-out screencap -p > running.png || true
           echo "--- crash buffer ---"
           "$ADB" logcat -d -b crash | head -n 150 || true
           echo "--- app log ---"
           "$ADB" logcat -d | grep -E "PacManVersus|pacmanversus|chromium.*(Uncaught|Error)" | tail -n 40 || true
-          "$ADB" shell pidof io.github.pchessman.pacmanversus || { echo "app is not running"; exit 1; }
+          # pass = Android drew the game's window and the app never crashed
+          "$ADB" logcat -d | grep -q "Displayed io.github.pchessman.pacmanversus/.MainActivity" \
+            || { echo "the game's window was never shown"; exit 1; }
+          if "$ADB" logcat -d -b crash | grep -q "Process: io.github.pchessman.pacmanversus"; then
+            echo "the app crashed"; exit 1
+          fi
+          echo "Installed and launched on Android 17"
 
       - uses: actions/upload-artifact@v4
         if: always()
