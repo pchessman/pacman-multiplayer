@@ -159,7 +159,10 @@ jobs:
           done
           sleep 25
           "$ADB" exec-out screencap -p > running.png
-          "$ADB" logcat -d | grep -E "AndroidRuntime|FATAL|PacManVersus|chromium.*(Uncaught|Error)" | tail -n 40 || true
+          echo "--- crash buffer ---"
+          "$ADB" logcat -d -b crash | head -n 150 || true
+          echo "--- app log ---"
+          "$ADB" logcat -d | grep -E "PacManVersus|pacmanversus|chromium.*(Uncaught|Error)" | tail -n 40 || true
           "$ADB" shell pidof io.github.pchessman.pacmanversus || { echo "app is not running"; exit 1; }
 
       - uses: actions/upload-artifact@v4
